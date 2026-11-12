@@ -54,6 +54,7 @@ app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.htm
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   if (err instanceof GameError) return res.status(err.status).json({ error: err.message });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Dati non validi.' });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'File troppo grande (massimo 10 MB).' });
   if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'Elemento già esistente.' });
   console.error(err);
   res.status(500).json({ error: 'Errore interno.' });

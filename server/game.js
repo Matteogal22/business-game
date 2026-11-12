@@ -1,7 +1,7 @@
 // Logica di gioco su database: creazione partita, macchina a stati, timer, round, calcolo KPI.
 const { db, log } = require('./db');
 const { randomCode, formatCode } = require('./auth');
-const { DEFAULT_PARAMS, DEFAULT_EVENTS, SEGMENTS, MARKETS, CHANNELS, CATEGORIES } = require('./defaults');
+const { DEFAULT_PARAMS, PRESETS, DEFAULT_EVENTS, SEGMENTS, MARKETS, CHANNELS, CATEGORIES } = require('./defaults');
 const { simulateRound } = require('./simulation');
 
 class GameError extends Error { constructor(msg, status = 400) { super(msg); this.status = status; } }
@@ -69,8 +69,45 @@ function validateParams(input, base = DEFAULT_PARAMS) {
     const src = i.markets && i.markets[m];
     if (src) set(p.markets[m], 'demandWeight', src.demandWeight, 0, 10, `Peso mercato ${m}`);
   }
-  if (i.scoreWeights) for (const k of Object.keys(p.scoreWeights)) set(p.scoreWeights, k, i.scoreWeights[k], 0, 10, `Peso ${k}`);
+  if (i.scoreWeights) for (const k of Object.keys(p.scoreWeights)) set(p.scoreWeights, k, i.scoreWeights[k], 0, 100, `Peso ${k}`);
+  if (Object.values(p.scoreWeights).reduce((a, b) => a + b, 0) <= 0) throw new GameError('Almeno una voce del punteggio deve avere un peso maggiore di zero.');
+  set(p, 'judgmentWeight', i.judgmentWeight, 0, 1, 'Peso del giudizio');
+  if (p.judgmentWeight === undefined) p.judgmentWeight = DEFAULT_PARAMS.judgmentWeight;
+  if (i.preset !== undefined) {
+    if (![...Object.keys(PRESETS), 'personalizzato'].includes(i.preset)) throw new GameError('Livello di difficoltà non valido.');
+    p.preset = i.preset;
+  }
   return p;
+}
+
+function validateAnalysis(body) {
+  const optNum = (v, min, max, label) => (v === undefined || v === null || v === '' ? null : num(v, min, max, label));
+  return {
+    market: longText(body.market, 2000, 'testo su mercato ed eventi'),
+    competitors: longText(body.competitors, 2000, 'testo sui concorrenti'),
+    strategy: longText(body.strategy, 2000, 'testo sulla strategia'),
+    risks: longText(body.risks, 2000, 'testo sui rischi'),
+    forecast_units: optNum(body.forecast_units, 0, 1e7, 'Previsione pezzi venduti'),
+    forecast_profit: optNum(body.forecast_profit, -1e9, 1e9, 'Previsione utile'),
+  };
+}
+// testo lungo: mantiene gli a capo
+function longText(v, max, label) {
+  const s = String(v ?? '').replace(/\r/g, '').trim();
+  if (s.length > max) throw new GameError(`Il ${label} è troppo lungo (max ${max} caratteri).`);
+  return s;
+}
+
+const CRITERIA = ['market', 'strategy', 'forecast', 'risks'];
+function validateEvaluation(body) {
+  const vote = num(body.vote, 0, 10, 'Voto');
+  if (Math.round(vote * 2) !== vote * 2) throw new GameError('Il voto può avere solo mezzi punti (es. 7,5).');
+  const criteria = {};
+  for (const k of CRITERIA) {
+    const v = body.criteria && body.criteria[k];
+    if (v !== undefined && v !== null && v !== '') criteria[k] = num(v, 0, 5, 'Criterio', { int: true });
+  }
+  return { vote, criteria, comment: longText(body.comment, 1500, 'commento') };
 }
 
 function validateEvent(body) {
@@ -340,13 +377,31 @@ function leaderboard(gameId) {
   return { round: last.number, rows };
 }
 
+// Classifica finale: punteggio di gioco + giudizio del docente, pesati come deciso nelle impostazioni
+function finalRanking(game) {
+  const params = JSON.parse(game.params_json);
+  const w = params.judgmentWeight ?? DEFAULT_PARAMS.judgmentWeight;
+  const lb = leaderboard(game.id);
+  const evals = new Map(db.prepare('SELECT * FROM evaluations WHERE game_id = ?').all(game.id).map((e) => [e.group_id, e]));
+  const rows = lb.rows.map((r) => {
+    const ev = evals.get(r.group_id);
+    const vote = ev ? ev.vote : null;
+    const finalScore = vote === null ? null : Math.round((r.score * (1 - w) + vote * 10 * w) * 100) / 100;
+    return { groupId: r.group_id, groupName: r.group_name, startupName: r.startup_name, segment: r.segment, market: r.market,
+      gameScore: r.score, gameRank: r.rank, vote, finalScore, effective: finalScore ?? r.score };
+  });
+  rows.sort((a, b) => b.effective - a.effective || b.gameScore - a.gameScore);
+  rows.forEach((r, i) => { r.finalRank = i + 1; r.movement = r.gameRank - r.finalRank; });
+  return { round: lb.round, weight: w, allEvaluated: rows.length > 0 && rows.every((r) => r.vote !== null), rows };
+}
+
 function roundEvents(roundId) {
   return db.prepare('SELECT event_id, snapshot_json FROM round_events WHERE round_id = ?').all(roundId)
     .map((r) => ({ id: r.event_id, ...JSON.parse(r.snapshot_json) }));
 }
 
 module.exports = {
-  GameError, validateDecision, validateStartup, validateParams, validateEvent,
+  GameError, validateDecision, validateStartup, validateParams, validateEvent, validateAnalysis, validateEvaluation, finalRanking, CRITERIA,
   createGame, updateGame, transition, openRound, closeRound, publicState, getStateRow,
   leaderboard, roundEvents, uniqueCode, formatCode,
 };

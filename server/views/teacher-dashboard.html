@@ -15,20 +15,7 @@
     <aside class="side">
       <h4>Sessioni</h4>
       <div id="gameList" class="gamelist"></div>
-      <div class="panel" id="newGamePanel">
-        <h2>Nuova sessione</h2>
-        <form id="newGameForm">
-          <label>Nome</label><input name="name" maxlength="100" required placeholder="Es. Master Fashion – Classe A">
-          <div class="grid3">
-            <div><label>Sessioni</label><input name="numSessions" type="number" min="1" max="10" value="3"></div>
-            <div><label>Minuti</label><input name="sessionMinutes" type="number" min="10" max="600" value="90"></div>
-            <div><label>Round</label><input name="numRounds" type="number" min="1" max="30" value="6"></div>
-          </div>
-          <label class="check"><input type="checkbox" name="leaderboardPublic" checked> Classifica visibile agli studenti</label>
-          <p><button type="submit" class="full">Crea e genera codice</button></p>
-        </form>
-        <div id="newGameMsg"></div>
-      </div>
+      <button type="button" class="full mt" id="newGameBtn">＋ Nuova sessione</button>
     </aside>
 
     <main>
@@ -37,6 +24,42 @@
         <h1>Crea la tua prima sessione</h1>
         <p class="sub">Dai un nome alla sessione: il codice di accesso per gli studenti viene generato in automatico.</p>
       </div>
+
+      <!-- CREAZIONE NUOVA SESSIONE -->
+      <section id="createView" class="hidden">
+        <div class="panel">
+          <h2>Nuova sessione</h2>
+          <p class="lead">Ogni campo spiega a cosa serve. Potrai cambiare tutto anche dopo, dalle Impostazioni.</p>
+          <form id="newGameForm" class="grid2">
+            <div>
+              <div class="field-h"><div class="lab-row"><label>Nome della sessione</label></div>
+                <input name="name" maxlength="100" required placeholder="Es. Master Fashion – Classe A">
+                <div class="help">Lo vedono anche gli studenti quando entrano. Per esempio corso + classe + anno.</div></div>
+              <div class="grid3 tight">
+                <div class="field-h"><div class="lab-row"><label>Lezioni</label></div><input name="numSessions" type="number" min="1" max="10" value="3">
+                  <div class="help">Quante volte vi incontrate in aula per giocare.</div></div>
+                <div class="field-h"><div class="lab-row"><label>Minuti a lezione</label></div><input name="sessionMinutes" type="number" min="10" max="600" value="90">
+                  <div class="help">Serve al timer.</div></div>
+                <div class="field-h"><div class="lab-row"><label>Round totali</label></div><input name="numRounds" type="number" min="1" max="30" value="6">
+                  <div class="help">Un round = gli studenti decidono, poi tu calcoli i risultati.</div></div>
+              </div>
+              <div class="field-h"><label class="check"><input type="checkbox" name="leaderboardPublic" checked> <span><strong>Mostra la classifica agli studenti durante il gioco</strong>
+                <small class="help">Attiva: i gruppi vedono la loro posizione dopo ogni round (più competizione). Disattiva: la scoprono solo alla fine.</small></span></label></div>
+              <div class="field-h"><div class="lab-row"><label>Peso del tuo giudizio finale</label><span class="hint" id="ngWeightVal">40%</span></div>
+                <input name="judgmentWeight" type="range" min="0" max="100" step="5" value="40" class="range">
+                <div class="help" id="ngWeightHelp"></div></div>
+              <div class="field-h"><div class="lab-row"><label>Difficoltà del mercato</label></div>
+                <div class="presets" id="ngPresets"></div></div>
+            </div>
+            <div>
+              <div class="hero on-dark compact"><div class="eyebrow">Come sarà la partita</div><p class="sub" id="ngCalc"></p><div class="lessons" id="ngLessons"></div></div>
+              <div class="msg info">Dopo aver creato la sessione ricevi il <b>codice per gli studenti</b>. Il gioco non parte finché non premi <b>Avvia sessione 1</b>.</div>
+              <p class="row mt"><button type="submit">Crea e genera codice</button><button type="button" class="secondary" id="createCancel">Annulla</button></p>
+              <div id="newGameMsg"></div>
+            </div>
+          </form>
+        </div>
+      </section>
 
       <div id="detail" class="hidden">
         <!-- HERO: timer e codice in primo piano -->
@@ -87,7 +110,10 @@
           <div class="panel"><h2>Registro attività</h2><div id="logBox" class="table-wrap"></div></div>
         </section>
 
-        <section data-panel="groups" class="hidden"><div class="panel"><h2>Gruppi partecipanti</h2><div id="groupsMsg"></div><div id="groupsBox" class="table-wrap"></div></div></section>
+        <section data-panel="groups" class="hidden">
+          <div class="panel" id="groupsList"><h2>Gruppi partecipanti</h2><p class="lead">Apri la <b>scheda</b> di un gruppo per vedere tutto il suo percorso e dare il giudizio finale.</p><div id="groupsMsg"></div><div id="groupsBox" class="table-wrap"></div></div>
+          <div id="dossierView" class="hidden"></div>
+        </section>
         <section data-panel="board" class="hidden"><div class="panel"><div id="boardBox" class="table-wrap"></div></div></section>
         <section data-panel="debrief" class="hidden"><div id="debriefBox"></div></section>
 
@@ -95,68 +121,60 @@
           <div class="panel"><h2>Catalogo eventi geopolitici</h2><p class="lead">Modifica gli eventi esistenti o aggiungine di nuovi. Si attivano all'apertura di un round.</p><div id="eventsBox" class="table-wrap"></div></div>
           <div class="panel">
             <h2 id="eventFormTitle">Nuovo evento</h2>
-            <form id="eventForm">
-              <input type="hidden" name="id">
-              <label>Titolo</label><input name="title" maxlength="100" required>
-              <label>Descrizione (visibile agli studenti)</label><textarea name="description" maxlength="600"></textarea>
-              <h3 class="mt">Effetti <small>— lascia vuoto ciò che non cambia</small></h3>
-              <div class="grid3">
-                <div><label>Domanda Europa (×)</label><input name="dm_EU" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Domanda Stati Uniti (×)</label><input name="dm_US" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Domanda Asia (×)</label><input name="dm_ASIA" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Domanda premium (×)</label><input name="ds_premium" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Domanda luxury (×)</label><input name="ds_luxury" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Costi di produzione (×)</label><input name="costMultiplier" type="number" step="0.01" placeholder="1"></div>
-                <div><label>Dazio Europa (+%)</label><input name="tm_EU" type="number" step="1" placeholder="0"></div>
-                <div><label>Dazio Stati Uniti (+%)</label><input name="tm_US" type="number" step="1" placeholder="0"></div>
-                <div><label>Dazio Asia (+%)</label><input name="tm_ASIA" type="number" step="1" placeholder="0"></div>
-                <div><label>Brand perso se sostenibilità &lt; 40</label><input name="lowSustainabilityBrandShock" type="number" step="1" placeholder="0"></div>
-                <div><label>Sensibilità green (+)</label><input name="sustainabilityPreferenceDelta" type="number" step="0.05" placeholder="0"></div>
+            <form id="eventForm" class="grid2">
+              <div>
+                <input type="hidden" name="id">
+                <div class="field-h"><div class="lab-row"><label>Titolo</label></div><input name="title" maxlength="100" required placeholder="Es. Rallentamento dei consumi in Cina">
+                  <div class="help">Breve e concreto, come un titolo di giornale.</div></div>
+                <div class="field-h"><div class="lab-row"><label>Descrizione per gli studenti</label></div><textarea name="description" maxlength="600"></textarea>
+                  <div class="help">È quello che leggono i gruppi. Non serve svelare i numeri: interpretarlo fa parte del gioco.</div></div>
+                <h3 class="mt">Effetti sul mercato</h3>
+                <p class="help">Lascia a 0 ciò che l'evento non tocca.</p>
+                <div id="effectFields"></div>
               </div>
-              <p class="row mt"><button type="submit">Salva evento</button><button type="button" class="secondary" id="eventCancel">Annulla</button></p>
+              <div>
+                <div class="effect-box" id="effectSummary"></div>
+                <div class="field-h"><div class="lab-row"><label>Gruppi colpiti in questa sessione</label></div><div class="chips" id="effectGroups"></div>
+                  <div class="help">Così sai in anticipo chi metterai in difficoltà: è anche un buon spunto per il commento in aula.</div></div>
+                <p class="row mt"><button type="submit">Salva evento</button><button type="button" class="secondary" id="eventCancel">Annulla</button></p>
+                <div id="eventMsg"></div>
+              </div>
             </form>
-            <div id="eventMsg"></div>
           </div>
         </section>
 
         <section data-panel="settings" class="hidden">
           <div class="panel">
-            <h2>Impostazioni e parametri del modello</h2>
-            <p class="lead">Le modifiche ai parametri valgono per i round calcolati dopo il salvataggio.</p>
+            <h2>Impostazioni del gioco</h2>
+            <p class="lead">Le modifiche valgono per i round calcolati dopo il salvataggio.</p>
             <form id="settingsForm">
               <div class="grid2">
-                <div><label>Nome della sessione</label><input name="name" maxlength="100" required></div>
+                <div class="field-h"><div class="lab-row"><label>Nome della sessione</label></div><input name="name" maxlength="100" required></div>
                 <div class="grid3">
-                  <div><label>Sessioni</label><input name="numSessions" type="number" min="1" max="10"></div>
-                  <div><label>Minuti</label><input name="sessionMinutes" type="number" min="10" max="600"></div>
-                  <div><label>Round</label><input name="numRounds" type="number" min="1" max="30"></div>
+                  <div class="field-h"><div class="lab-row"><label>Lezioni</label></div><input name="numSessions" type="number" min="1" max="10"></div>
+                  <div class="field-h"><div class="lab-row"><label>Minuti</label></div><input name="sessionMinutes" type="number" min="10" max="600"></div>
+                  <div class="field-h"><div class="lab-row"><label>Round</label></div><input name="numRounds" type="number" min="1" max="30"></div>
                 </div>
               </div>
-              <label class="check"><input type="checkbox" name="leaderboardPublic"> Classifica visibile agli studenti durante il gioco</label>
-              <h3 class="mt">Economia</h3>
-              <div class="grid3">
-                <div><label>Cassa iniziale (€)</label><input name="p_startingCash" type="number" step="1000"></div>
-                <div><label>Costi fissi per round (€)</label><input name="p_fixedCostPerRound" type="number" step="1000"></div>
-                <div><label>Difficoltà del mercato</label><input name="p_outsideOption" type="number" step="0.1"></div>
-                <div><label>Sensibilità green (0–2)</label><input name="p_sustainabilityPreference" type="number" step="0.05"></div>
-                <div><label>Costo magazzino (quota)</label><input name="p_holdingCostRate" type="number" step="0.01"></div>
-              </div>
-              <h3 class="mt">Segmenti</h3>
-              <div class="grid3" id="segFields"></div>
-              <h3 class="mt">Peso dei mercati sulla domanda</h3>
-              <div class="grid3">
-                <div><label>Europa</label><input name="m_EU" type="number" step="0.05"></div>
-                <div><label>Stati Uniti</label><input name="m_US" type="number" step="0.05"></div>
-                <div><label>Asia</label><input name="m_ASIA" type="number" step="0.05"></div>
-              </div>
-              <h3 class="mt">Pesi del punteggio</h3>
-              <div class="grid3">
-                <div><label>Utile cumulato</label><input name="w_cumProfit" type="number" step="0.05"></div>
-                <div><label>Brand</label><input name="w_brand" type="number" step="0.05"></div>
-                <div><label>Quota di mercato</label><input name="w_marketShare" type="number" step="0.05"></div>
-                <div><label>Sostenibilità</label><input name="w_sustainability" type="number" step="0.05"></div>
-                <div><label>Cassa</label><input name="w_cash" type="number" step="0.05"></div>
-              </div>
+              <label class="check mt"><input type="checkbox" name="leaderboardPublic"> <span><strong>Mostra la classifica agli studenti durante il gioco</strong></span></label>
+
+              <h3 class="mt">Difficoltà del mercato</h3>
+              <p class="help">Scegli un livello: va bene per la maggior parte delle classi. Cambia cassa iniziale, spese fisse, numero di clienti e quanto sono esigenti.</p>
+              <div class="presets mt" id="setPresets"></div>
+
+              <h3 class="mt">Cosa conta per vincere</h3>
+              <p class="help">Quanto pesa ogni risultato nel punteggio di gioco. Il totale viene riportato a 100% al salvataggio.</p>
+              <div class="weights mt" id="weightsBar"></div>
+              <div class="grid3" id="weightFields"></div>
+
+              <h3 class="mt">Giudizio finale della docente</h3>
+              <div class="field-h"><div class="lab-row"><label>Peso del tuo giudizio sul punteggio finale</label><span class="hint" id="setWeightVal"></span></div>
+                <input name="judgmentWeight" type="range" min="0" max="100" step="5" class="range">
+                <div class="help" id="setWeightHelp"></div></div>
+
+              <details class="adv mt"><summary>Impostazioni avanzate <small>— facoltative, per chi vuole regolare il mercato nel dettaglio</small></summary>
+                <div class="grid3 mt" id="advFields"></div>
+              </details>
               <p class="mt"><button type="submit">Salva impostazioni</button></p>
             </form>
             <div id="settingsMsg"></div>

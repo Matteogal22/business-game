@@ -24,6 +24,24 @@ const DEFAULT_PARAMS = {
     wholesale: { label: 'Wholesale / multibrand', reach: { premium: 1.35, luxury: 1.1 }, priceShare: 0.6, fixedCost: 0 },
   },
   scoreWeights: { cumProfit: 0.3, brand: 0.2, marketShare: 0.2, sustainability: 0.15, cash: 0.15 },
+  judgmentWeight: 0.4,           // peso del giudizio finale del docente (0-1)
+  preset: 'standard',
+};
+
+// Preset di difficoltà: modificano solo i parametri economici principali
+const PRESETS = {
+  facile: {
+    label: 'Facile', startingCash: 700000, fixedCostPerRound: 30000, outsideOption: 1.0,
+    segments: { premium: { baseDemand: 14000, elasticity: 1.3 }, luxury: { baseDemand: 3000, elasticity: 0.4 } },
+  },
+  standard: {
+    label: 'Standard', startingCash: 500000, fixedCostPerRound: 40000, outsideOption: 1.5,
+    segments: { premium: { baseDemand: 12000, elasticity: 1.5 }, luxury: { baseDemand: 2500, elasticity: 0.5 } },
+  },
+  sfidante: {
+    label: 'Sfidante', startingCash: 400000, fixedCostPerRound: 50000, outsideOption: 2.2,
+    segments: { premium: { baseDemand: 10000, elasticity: 1.8 }, luxury: { baseDemand: 2000, elasticity: 0.65 } },
+  },
 };
 
 // Struttura effetti di un evento (tutti opzionali):
@@ -59,4 +77,4 @@ const MARKETS = ['EU', 'US', 'ASIA'];
 const CHANNELS = ['ecommerce', 'boutique', 'wholesale'];
 const CATEGORIES = ['abbigliamento', 'accessori', 'calzature', 'gioielli', 'pelletteria'];
 
-module.exports = { DEFAULT_PARAMS, DEFAULT_EVENTS, SEGMENTS, MARKETS, CHANNELS, CATEGORIES };
+module.exports = { DEFAULT_PARAMS, PRESETS, DEFAULT_EVENTS, SEGMENTS, MARKETS, CHANNELS, CATEGORIES };

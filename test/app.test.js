@@ -26,10 +26,12 @@ function client() {
     const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'business-game', ...extraHeaders };
     const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
     if (cookie) headers.Cookie = cookie;
-    const r = await fetch(base + url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (Buffer.isBuffer(body)) headers['Content-Type'] = 'application/octet-stream';
+    const r = await fetch(base + url, { method, headers, body: body === undefined ? undefined : (Buffer.isBuffer(body) ? body : JSON.stringify(body)) });
     for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const i = kv.indexOf('='); jar[kv.slice(0, i)] = kv.slice(i + 1); }
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (r.headers.get('content-disposition')) data = { file: true, type: r.headers.get('content-type'), text };
     return { status: r.status, data };
   };
 }
@@ -178,6 +180,38 @@ test('isolamento: lo stato studente contiene solo i propri dati', async () => {
   assert.ok(!JSON.stringify(st3).includes('Maison Alfa'));
 });
 
+let fileId;
+test('studio del gruppo e allegati: salvataggio e permessi', async () => {
+  const a = { market: 'Dazi USA:\nnon ci toccano', competitors: 'Beta punta sul prezzo', strategy: 'Boutique', risks: 'Sostenibilità bassa', forecast_units: 600, forecast_profit: 150000 };
+  assert.equal((await s1('PUT', '/api/student/analysis', a)).status, 200);
+  assert.equal((await s1('PUT', '/api/student/analysis', { ...a, forecast_units: -3 })).status, 400);
+  const st = (await s1('GET', '/api/student/state')).data;
+  assert.equal(st.openRound.analysis.market, 'Dazi USA:\nnon ci toccano');
+  // allegati: PDF ok, eseguibile camuffato rifiutato
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(200, 32)]);
+  const up = await s1('POST', '/api/student/attachments', pdf, { 'X-Filename': encodeURIComponent('Studio mercato.pdf') });
+  assert.equal(up.status, 201); fileId = up.data.id;
+  assert.equal((await s1('POST', '/api/student/attachments', Buffer.from('MZ\x90\x00finto'), { 'X-Filename': 'virus.pdf' })).status, 400);
+  assert.equal((await s1('POST', '/api/student/attachments', Buffer.from('PK\x03\x04xxxx'), { 'X-Filename': 'archivio.zip' })).status, 400);
+  // il proprio gruppo scarica, un altro gruppo no, un'altra partita no
+  const own = await s1('GET', `/api/student/attachments/${fileId}`);
+  assert.equal(own.status, 200); assert.equal(own.data.type, 'application/pdf');
+  assert.equal((await s2('GET', `/api/student/attachments/${fileId}`)).status, 404);
+  assert.equal((await s3('GET', `/api/student/attachments/${fileId}`)).status, 404);
+  assert.equal((await s2('DELETE', `/api/student/attachments/${fileId}`)).status, 404);
+  // la docente lo scarica dalla propria partita, non da un'altra; uno studente non usa la rotta docente
+  assert.equal((await prof('GET', `/api/teacher/games/${gameId}/attachments/${fileId}`)).status, 200);
+  assert.equal((await prof('GET', `/api/teacher/games/${gameId2}/attachments/${fileId}`)).status, 404);
+  assert.equal((await prof2('GET', `/api/teacher/games/${gameId}/attachments/${fileId}`)).status, 404);
+  assert.equal((await s1('GET', `/api/teacher/games/${gameId}/attachments/${fileId}`)).status, 401);
+  // la scheda del gruppo mostra analisi e allegato
+  const g = (await prof('GET', `/api/teacher/games/${gameId}`)).data;
+  const alfa = g.groups.find((x) => x.name === 'Alfa');
+  const dossier = (await prof('GET', `/api/teacher/games/${gameId}/groups/${alfa.id}/dossier`)).data;
+  assert.equal(dossier.rounds[0].analysis.strategy, 'Boutique');
+  assert.equal(dossier.rounds[0].files[0].filename, 'Studio mercato.pdf');
+});
+
 test('chiusura round, KPI, classifica e salvataggio tra sessioni', async () => {
   assert.equal((await prof('POST', `/api/teacher/games/${gameId}/rounds/close`)).status, 200);
   const g = (await prof('GET', `/api/teacher/games/${gameId}`)).data;
@@ -245,8 +279,53 @@ test('eventi personalizzati, parametri, debriefing, fine partita, CSV', async ()
   assert.equal(g.code.status, 'expired');
   assert.equal(g.state.status, 'ended');
   const csv = await prof('GET', `/api/teacher/games/${gameId}/export.csv`);
-  assert.match(csv.data, /round;gruppo;startup/);
+  assert.match(csv.data.text, /round;gruppo;startup/);
   assert.equal((await s1('PUT', '/api/student/decision', { price: 1 })).status, 403);
+});
+
+test('giudizio finale: solo la docente, visibile agli studenti solo alla fine, ribalta la classifica', async () => {
+  // nuova partita breve con due gruppi
+  const gid = (await prof('POST', '/api/teacher/games', { name: 'Giudizio', numRounds: 1, params: { judgmentWeight: 0.6 } })).data.id;
+  const c = (await prof('GET', `/api/teacher/games/${gid}`)).data.code.code;
+  const a = client(), b = client();
+  await a('POST', '/api/student/join', { code: c, groupName: 'A' });
+  await b('POST', '/api/student/join', { code: c, groupName: 'B' });
+  await a('PUT', '/api/student/startup', { name: 'Alta', segment: 'luxury', category: 'gioielli', market: 'EU' });
+  await b('PUT', '/api/student/startup', { name: 'Bassa', segment: 'luxury', category: 'gioielli', market: 'EU' });
+  await prof('POST', `/api/teacher/games/${gid}/state/start`);
+  await prof('POST', `/api/teacher/games/${gid}/rounds/open`, {});
+  await a('PUT', '/api/student/decision', { price: 950, production: 700, marketing: 90000, design: 60000, sustainability: 60000, channel: 'boutique' });
+  await b('PUT', '/api/student/decision', { price: 300, production: 3000, marketing: 0, design: 0, sustainability: 0, channel: 'wholesale' });
+  await prof('POST', `/api/teacher/games/${gid}/rounds/close`);
+  const det = (await prof('GET', `/api/teacher/games/${gid}`)).data;
+  const lb = det.leaderboard.rows;
+  const winner = lb[0], loser = lb[1];
+  const idOf = (name) => det.groups.find((g) => g.name === name).id;
+  // la scomposizione del punteggio è presente
+  const st = (await a('GET', '/api/student/state')).data;
+  assert.ok(st.history[0].details.scoreParts.cumProfit.points >= 0);
+  // lo studente non può dare voti
+  assert.equal((await a('PUT', `/api/teacher/games/${gid}/groups/${idOf('A')}/evaluation`, { vote: 10 })).status, 401);
+  assert.equal((await prof('PUT', `/api/teacher/games/${gid}/groups/${idOf('A')}/evaluation`, { vote: 11 })).status, 400);
+  assert.equal((await prof('PUT', `/api/teacher/games/${gid}/groups/${idOf('A')}/evaluation`, { vote: 7.3 })).status, 400);
+  // voto basso al vincitore, alto all'ultimo: con peso 60% la classifica si ribalta
+  await prof('PUT', `/api/teacher/games/${gid}/groups/${winner.group_id}/evaluation`, { vote: 0, comment: 'Ragionamento assente', criteria: { market: 1 } });
+  await prof('PUT', `/api/teacher/games/${gid}/groups/${loser.group_id}/evaluation`, { vote: 10, comment: 'Ottimo studio' });
+  const fin = (await prof('GET', `/api/teacher/games/${gid}/final`)).data;
+  assert.equal(fin.weight, 0.6); assert.ok(fin.allEvaluated);
+  assert.equal(fin.rows[0].groupId, loser.group_id);
+  assert.equal(fin.rows[0].finalScore, Math.round((loser.score * 0.4 + 60) * 100) / 100);
+  assert.equal(fin.rows[0].movement, 1);
+  // prima del debriefing gli studenti non vedono il giudizio
+  assert.equal((await a('GET', '/api/student/state')).data.evaluation, null);
+  await prof('POST', `/api/teacher/games/${gid}/state/debrief`);
+  const sa = (await a('GET', '/api/student/state')).data;
+  assert.ok(sa.evaluation); assert.ok(sa.leaderboard.final);
+  const sb = (await b('GET', '/api/student/state')).data;
+  assert.notEqual(sa.evaluation.comment, sb.evaluation.comment); // ognuno vede solo il proprio
+  // un altro docente non vede né modifica
+  assert.equal((await prof2('GET', `/api/teacher/games/${gid}/final`)).status, 404);
+  assert.equal((await prof2('PUT', `/api/teacher/games/${gid}/groups/${idOf('A')}/evaluation`, { vote: 5 })).status, 404);
 });
 
 test('logout docente invalida la sessione', async () => {

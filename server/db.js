@@ -167,6 +167,40 @@ CREATE TABLE IF NOT EXISTS kpis (
   PRIMARY KEY (round_id, group_id)
 );
 
+-- 11. STUDIO DEL GRUPPO (analisi guidata per round) -------------------------
+CREATE TABLE IF NOT EXISTS analyses (
+  round_id        INTEGER NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  group_id        INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  market          TEXT NOT NULL DEFAULT '',
+  competitors     TEXT NOT NULL DEFAULT '',
+  strategy        TEXT NOT NULL DEFAULT '',
+  risks           TEXT NOT NULL DEFAULT '',
+  forecast_units  REAL,
+  forecast_profit REAL,
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (round_id, group_id)
+);
+CREATE TABLE IF NOT EXISTS attachments (          -- studio completo allegato (PDF, slide, immagini)
+  id           INTEGER PRIMARY KEY,
+  round_id     INTEGER NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  filename     TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size         INTEGER NOT NULL,
+  data         BLOB NOT NULL,
+  created_at   INTEGER NOT NULL
+);
+
+-- 12. GIUDIZIO FINALE DEL DOCENTE ---------------------------------------------
+CREATE TABLE IF NOT EXISTS evaluations (
+  group_id      INTEGER PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+  game_id       INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+  vote          REAL NOT NULL,              -- 0-10
+  criteria_json TEXT NOT NULL DEFAULT '{}', -- promemoria 1-5 per criterio
+  comment       TEXT NOT NULL DEFAULT '',
+  updated_at    INTEGER NOT NULL
+);
+
 -- Registro attività (utile al docente per ricostruire cosa è successo)
 CREATE TABLE IF NOT EXISTS audit_log (
   id      INTEGER PRIMARY KEY,

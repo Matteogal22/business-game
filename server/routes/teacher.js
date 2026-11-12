@@ -4,6 +4,7 @@ const express = require('express');
 const { db, log } = require('../db');
 const auth = require('../auth');
 const game = require('../game');
+const att = require('../attachments');
 
 const router = express.Router();
 const loginLimiter = auth.rateLimit({ windowMs: 10 * 60 * 1000, max: 10, key: (req) => 'login:' + req.ip });
@@ -51,14 +52,17 @@ own.get('/', (req, res) => {
     FROM groups g LEFT JOIN startups s ON s.group_id = g.id WHERE g.game_id = ? ORDER BY g.id`).all(g.id);
   const members = db.prepare('SELECT m.group_id, m.name FROM group_members m JOIN groups g ON g.id = m.group_id WHERE g.game_id = ?').all(g.id);
   for (const gr of groups) gr.members = members.filter((m) => m.group_id === gr.id).map((m) => m.name);
+  const evals = new Map(db.prepare('SELECT group_id, vote FROM evaluations WHERE game_id = ?').all(g.id).map((e) => [e.group_id, e.vote]));
+  for (const gr of groups) gr.vote = evals.has(gr.id) ? evals.get(gr.id) : null;
 
   const rounds = db.prepare('SELECT * FROM rounds WHERE game_id = ? ORDER BY number').all(g.id)
     .map((r) => ({ ...r, events: game.roundEvents(r.id) }));
   const openRound = rounds.find((r) => r.status === 'open');
   let currentDecisions = [];
   if (openRound) {
+    const studied = new Set(db.prepare(`SELECT group_id FROM analyses WHERE round_id = ? AND (market != '' OR competitors != '' OR strategy != '' OR risks != '')`).all(openRound.id).map((a) => a.group_id));
     currentDecisions = db.prepare('SELECT group_id, payload_json, updated_at FROM decisions WHERE round_id = ?').all(openRound.id)
-      .map((d) => ({ groupId: d.group_id, decision: JSON.parse(d.payload_json), updatedAt: d.updated_at }));
+      .map((d) => ({ groupId: d.group_id, decision: JSON.parse(d.payload_json), updatedAt: d.updated_at, studied: studied.has(d.group_id) }));
   }
   const sessions = db.prepare('SELECT number, status, started_at, closed_at, elapsed_ms, running_since FROM class_sessions WHERE game_id = ? ORDER BY number').all(g.id)
     .map((s) => ({ ...s, elapsed_ms: s.elapsed_ms + (s.status === 'running' && s.running_since ? Date.now() - s.running_since : 0) }));
@@ -134,6 +138,59 @@ own.delete('/groups/:groupId', (req, res) => {
   res.json({ ok: true });
 });
 
+// ----- Scheda del gruppo: tutto il percorso, round per round -----
+function ownGroup(req) {
+  const gr = db.prepare('SELECT * FROM groups WHERE id = ? AND game_id = ?').get(Number(req.params.groupId), req.game.id);
+  if (!gr) throw new game.GameError('Gruppo non trovato.', 404);
+  return gr;
+}
+own.get('/groups/:groupId/dossier', (req, res) => {
+  const gr = ownGroup(req);
+  const startup = db.prepare('SELECT name, segment, category, market, positioning, values_text FROM startups WHERE group_id = ?').get(gr.id) || null;
+  const members = db.prepare('SELECT name FROM group_members WHERE group_id = ?').all(gr.id).map((m) => m.name);
+  const rounds = db.prepare('SELECT * FROM rounds WHERE game_id = ? ORDER BY number').all(req.game.id).map((r) => {
+    const d = db.prepare('SELECT payload_json, auto FROM decisions WHERE round_id = ? AND group_id = ?').get(r.id, gr.id);
+    const a = db.prepare('SELECT * FROM analyses WHERE round_id = ? AND group_id = ?').get(r.id, gr.id);
+    const k = db.prepare('SELECT * FROM kpis WHERE round_id = ? AND group_id = ?').get(r.id, gr.id);
+    const files = db.prepare('SELECT id, filename, size FROM attachments WHERE round_id = ? AND group_id = ? ORDER BY id').all(r.id, gr.id);
+    return {
+      number: r.number, status: r.status, events: game.roundEvents(r.id).map(({ title }) => ({ title })),
+      decision: d ? JSON.parse(d.payload_json) : null, auto: d ? !!d.auto : false,
+      analysis: a ? { market: a.market, competitors: a.competitors, strategy: a.strategy, risks: a.risks, forecast_units: a.forecast_units, forecast_profit: a.forecast_profit } : null,
+      kpi: k ? { ...k, details: JSON.parse(k.details_json), details_json: undefined } : null,
+      files,
+    };
+  });
+  const ev = db.prepare('SELECT vote, criteria_json, comment, updated_at FROM evaluations WHERE group_id = ?').get(gr.id);
+  const fr = game.finalRanking(req.game).rows.find((r) => r.groupId === gr.id) || null;
+  res.json({
+    group: { id: gr.id, name: gr.name, members }, startup, rounds,
+    evaluation: ev ? { vote: ev.vote, criteria: JSON.parse(ev.criteria_json), comment: ev.comment, updatedAt: ev.updated_at } : null,
+    ranking: fr, weight: JSON.parse(req.game.params_json).judgmentWeight ?? 0.4,
+  });
+});
+own.put('/groups/:groupId/evaluation', (req, res) => {
+  const gr = ownGroup(req);
+  const e = game.validateEvaluation(req.body || {});
+  db.prepare(`INSERT INTO evaluations (group_id, game_id, vote, criteria_json, comment, updated_at) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(group_id) DO UPDATE SET vote=excluded.vote, criteria_json=excluded.criteria_json, comment=excluded.comment, updated_at=excluded.updated_at`)
+    .run(gr.id, req.game.id, e.vote, JSON.stringify(e.criteria), e.comment, Date.now());
+  log(req.game.id, 'docente', `Giudizio salvato per gruppo #${gr.id}`);
+  res.json({ ok: true });
+});
+own.delete('/groups/:groupId/evaluation', (req, res) => {
+  const gr = ownGroup(req);
+  db.prepare('DELETE FROM evaluations WHERE group_id = ?').run(gr.id);
+  res.json({ ok: true });
+});
+// Download di un allegato di un gruppo della PROPRIA partita
+own.get('/attachments/:attId', (req, res) => {
+  const row = db.prepare(`SELECT f.* FROM attachments f JOIN groups g ON g.id = f.group_id WHERE f.id = ? AND g.game_id = ?`).get(Number(req.params.attId), req.game.id);
+  if (!row) return res.status(404).json({ error: 'File non trovato.' });
+  att.sendFile(res, row);
+});
+own.get('/final', (req, res) => res.json(game.finalRanking(req.game)));
+
 // Catalogo eventi (personalizzabile)
 own.post('/events', (req, res) => {
   const e = game.validateEvent(req.body || {});
@@ -159,9 +216,10 @@ own.delete('/events/:eventId', (req, res) => {
 
 // Risultati aggregati e storico completo (per debriefing)
 own.get('/results', (req, res) => {
-  const rows = db.prepare(`SELECT r.number AS round, k.*, g.name AS group_name, s.name AS startup_name, s.segment, s.market, d.payload_json, d.auto
+  const rows = db.prepare(`SELECT r.number AS round, k.*, g.name AS group_name, s.name AS startup_name, s.segment, s.market, d.payload_json, d.auto, a.strategy
     FROM kpis k JOIN rounds r ON r.id = k.round_id JOIN groups g ON g.id = k.group_id JOIN startups s ON s.group_id = g.id
     LEFT JOIN decisions d ON d.round_id = k.round_id AND d.group_id = k.group_id
+    LEFT JOIN analyses a ON a.round_id = k.round_id AND a.group_id = k.group_id
     WHERE r.game_id = ? ORDER BY r.number, k.rank`).all(req.game.id)
     .map((r) => ({ ...r, decision: r.payload_json ? JSON.parse(r.payload_json) : null, details: JSON.parse(r.details_json), payload_json: undefined, details_json: undefined }));
   const byRound = {};
@@ -179,17 +237,23 @@ own.get('/results', (req, res) => {
 
 own.get('/export.csv', (req, res) => {
   const rows = db.prepare(`SELECT r.number, g.name AS gruppo, s.name AS startup, s.segment, s.market, d.payload_json, k.revenue, k.units_sold, k.profit,
-      k.cum_profit, k.cash, k.brand, k.quality, k.sustainability, k.market_share, k.score, k.rank
+      k.cum_profit, k.cash, k.brand, k.quality, k.sustainability, k.market_share, k.score, k.rank,
+      a.market AS a_market, a.competitors AS a_comp, a.strategy AS a_strat, a.risks AS a_risks, a.forecast_units, a.forecast_profit, e.vote
     FROM kpis k JOIN rounds r ON r.id = k.round_id JOIN groups g ON g.id = k.group_id JOIN startups s ON s.group_id = g.id
-    LEFT JOIN decisions d ON d.round_id = k.round_id AND d.group_id = k.group_id WHERE r.game_id = ? ORDER BY r.number, k.rank`).all(req.game.id);
+    LEFT JOIN decisions d ON d.round_id = k.round_id AND d.group_id = k.group_id
+    LEFT JOIN analyses a ON a.round_id = k.round_id AND a.group_id = k.group_id
+    LEFT JOIN evaluations e ON e.group_id = g.id
+    WHERE r.game_id = ? ORDER BY r.number, k.rank`).all(req.game.id);
   const esc = (v) => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const head = ['round', 'gruppo', 'startup', 'segmento', 'mercato', 'prezzo', 'produzione', 'marketing', 'design', 'sostenibilita_inv', 'canale', 'motivazione',
-    'ricavi', 'unita_vendute', 'utile', 'utile_cumulato', 'cassa', 'brand', 'qualita', 'sostenibilita', 'quota_mercato', 'punteggio', 'posizione'];
+    'ricavi', 'unita_vendute', 'utile', 'utile_cumulato', 'cassa', 'brand', 'qualita', 'sostenibilita', 'quota_mercato', 'punteggio', 'posizione',
+    'studio_mercato', 'studio_concorrenti', 'studio_strategia', 'studio_rischi', 'previsione_pezzi', 'previsione_utile', 'voto_docente_finale'];
   const lines = [head.join(';')];
   for (const r of rows) {
     const d = r.payload_json ? JSON.parse(r.payload_json) : {};
     lines.push([r.number, r.gruppo, r.startup, r.segment, r.market, d.price, d.production, d.marketing, d.design, d.sustainability, d.channel, d.notes,
-      r.revenue, r.units_sold, r.profit, r.cum_profit, r.cash, r.brand, r.quality, r.sustainability, r.market_share, r.score, r.rank].map(esc).join(';'));
+      r.revenue, r.units_sold, r.profit, r.cum_profit, r.cash, r.brand, r.quality, r.sustainability, r.market_share, r.score, r.rank,
+      r.a_market, r.a_comp, r.a_strat, r.a_risks, r.forecast_units, r.forecast_profit, r.vote].map(esc).join(';'));
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="business-game-${req.game.id}.csv"`);

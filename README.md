@@ -76,6 +76,14 @@ Decisioni per round: prezzo, quantità prodotta, investimenti in marketing, desi
 **Personalizzazione** (scheda *Impostazioni*): cassa iniziale, costi fissi, difficoltà del mercato, sensibilità green, costi di magazzino, prezzo di riferimento / elasticità / domanda / costo unitario per segmento, peso dei mercati e pesi del punteggio.
 **Eventi** (scheda *Eventi*): 9 eventi pronti (dazi USA, rallentamento Cina, crisi Mar Rosso, passaporto digitale UE, ecc.). Puoi modificarli o crearne di nuovi combinando: moltiplicatori di domanda per mercato e segmento, moltiplicatore dei costi, dazi per mercato, penalità di brand per chi è poco sostenibile, aumento della sensibilità green.
 
+## 5b. Studio dei gruppi e giudizio del docente
+
+- **Ogni round ha due passi.** Nel primo il gruppo prende le decisioni: ogni campo spiega cosa fa e mostra l'effetto previsto. Nel secondo compila lo **studio**: mercato ed eventi, concorrenti, strategia e alternative, rischi, previsione di pezzi e utile. Può anche allegare dei file (PDF, PNG/JPG, PowerPoint, Word, Excel; max 5 da 10 MB per round). Il server controlla il tipo reale del file.
+- **Punteggio spiegato.** Dopo ogni round il gruppo vede le cinque voci del punteggio, il punto forte, quello debole e la previsione confrontata con il risultato.
+- **Scheda del gruppo** (area docente → Gruppi → Apri scheda). Mostra tutto il percorso e il pannello del **giudizio finale**: voto 0–10, criteri promemoria e commento.
+- **Classifica finale** = punteggio di gioco × (1 − peso) + voto × 10 × peso. Il peso lo decide il docente; il valore iniziale è 40%. Gli studenti vedono voto, commento e classifica finale solo nel debriefing. La classifica finale compare agli studenti quando tutti i gruppi sono stati valutati.
+- Gli allegati sono scaricabili solo dal gruppo che li ha caricati e dal docente della partita.
+
 ## 6. Sicurezza e permessi
 
 | Ruolo | Come viene riconosciuto | Cosa può fare |

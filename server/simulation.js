@@ -146,8 +146,14 @@ function simulateRound(params, players, events) {
   const wSum = Object.values(w).reduce((a, b) => a + b, 0) || 1;
   for (const r of results) {
     let s = 0;
-    for (const [k, field] of Object.entries(comps)) s += (w[k] || 0) * norm[k](r[field]);
+    const parts = {};
+    for (const [k, field] of Object.entries(comps)) {
+      const pts = norm[k](r[field]);
+      parts[k] = { points: round2(pts), weight: round2((w[k] || 0) / wSum) };
+      s += (w[k] || 0) * pts;
+    }
     r.score = round2(s / wSum);
+    r.details.scoreParts = parts; // per spiegare il punteggio a studenti e docente
   }
   const ranked = [...results].sort((a, b) => b.score - a.score || b.cum_profit - a.cum_profit);
   ranked.forEach((r, i) => { r.rank = i + 1; });
