@@ -1,0 +1,27 @@
+# Configurazione Render a PAGAMENTO con disco persistente (per l'uso reale con il database su disco).
+# Per usarla rinominala in render.yaml al posto della versione demo.
+# Crea un servizio web Node con un disco persistente per il database delle partite.
+services:
+  - type: web
+    name: business-game
+    runtime: node
+    plan: starter            # serve un piano a pagamento: il piano gratuito non ha disco persistente
+    region: frankfurt        # server in Europa
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: dati-partite
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DB_PATH
+        value: /var/data/business-game.sqlite
+      - key: TEACHERS_JSON     # account docente: il valore si incolla nel pannello di Render
+        sync: false

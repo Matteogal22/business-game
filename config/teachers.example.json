@@ -1,0 +1,3 @@
+[
+  { "email": "docente@scuola.it", "name": "Prof. Esempio", "passwordHash": "scrypt$...generato con scripts/add-teacher.js..." }
+]

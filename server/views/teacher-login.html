@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Accesso docente · Business Game</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="entry">
+    <div class="brand"><div class="logo"></div>Business Game</div>
+    <div class="eyebrow">Area riservata</div>
+    <h1>Accesso docente</h1>
+    <p class="sub">Possono entrare solo i docenti presenti nella lista autorizzata del server.</p>
+    <div class="panel">
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <p class="mt"><button type="submit" class="full">Accedi</button></p>
+      </form>
+      <div id="loginMsg"></div>
+    </div>
+    <p class="foot">Sei uno studente? <a href="/">Vai all'area studenti</a></p>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/teacher-login.js"></script>
+</body>
+</html>

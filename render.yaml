@@ -1,0 +1,27 @@
+# Configurazione per Render (https://render.com) – VERSIONE DEMO GRATUITA
+# Piano gratuito: nessun disco permanente. Il sito si spegne dopo un periodo senza visite
+# e alla riaccensione i dati delle partite vengono azzerati. Va bene per provare e mostrare il gioco.
+services:
+  - type: web
+    name: business-game-demo
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DEMO_MODE
+        value: "1"
+      - key: TEACHER_NAME
+        value: Docente
+      - key: TEACHER_EMAIL       # email con cui il docente entrerà in /docente
+        sync: false
+      - key: TEACHER_PASSWORD    # password del docente (almeno 10 caratteri), resta segreta su Render
+        sync: false

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07080B">
+  <title>Business Game</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- INGRESSO -->
+  <main id="join" class="entry hidden">
+    <div class="brand"><div class="logo"></div>Business Game</div>
+    <div class="eyebrow">Fashion &amp; Luxury</div>
+    <h1>Entra nella sessione</h1>
+    <p class="sub">Inserisci il codice che il docente mostra in aula.</p>
+    <div class="panel">
+      <form id="codeForm">
+        <label for="code">Codice della sessione</label>
+        <input id="code" class="code-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH" maxlength="12" required>
+        <p class="mt"><button type="submit" class="full">Partecipa</button></p>
+      </form>
+      <div id="codeInfo"></div>
+      <form id="groupForm" class="hidden">
+        <label for="groupName">Nome del gruppo</label>
+        <input id="groupName" maxlength="40" required>
+        <label for="members">Componenti <small>— facoltativo, uno per riga</small></label>
+        <textarea id="members" placeholder="Nome Cognome&#10;Nome Cognome"></textarea>
+        <div id="pinWrap" class="hidden">
+          <label for="pin">PIN di rientro del gruppo</label>
+          <input id="pin" autocomplete="off" maxlength="8">
+          <small>Il PIN è stato mostrato quando il gruppo si è registrato. Se l'avete perso chiedetelo al docente.</small>
+        </div>
+        <p class="mt"><button type="submit" class="full primary-blue">Entra nel gioco</button></p>
+      </form>
+      <div id="joinMsg"></div>
+    </div>
+    <p class="foot">Nessun account richiesto.</p>
+  </main>
+
+  <!-- PIN APPENA CREATO -->
+  <main id="pinShow" class="entry hidden">
+    <div class="brand"><div class="logo"></div>Business Game</div>
+    <h1>Gruppo registrato</h1>
+    <p class="sub">Annotate il PIN di rientro: vi servirà nelle sessioni successive o per entrare da un altro dispositivo.</p>
+    <div class="panel">
+      <div class="pin" id="pinValue"></div>
+      <p class="mt"><button id="pinOk" class="full">Ho annotato il PIN, continua</button></p>
+    </div>
+  </main>
+
+  <!-- GIOCO -->
+  <div id="game" class="hidden">
+    <nav class="nav"><div class="logo"></div><span class="title">Business Game</span><span class="spacer"></span><span id="whoami" class="who"></span><button class="secondary small" id="leaveBtn">Esci</button></nav>
+    <div class="wrap">
+      <section class="hero on-dark student-hero">
+        <div>
+          <div class="eyebrow" id="sGame"></div>
+          <h1 id="sGroup"></h1>
+          <div class="sub" id="sSub"></div>
+          <div class="hero-stats">
+            <div class="stat"><div class="l">Stato</div><div class="v" id="sStatus"></div></div>
+            <div class="stat"><div class="l">Sessione</div><div class="v" id="sSession"></div></div>
+            <div class="stat"><div class="l">Round</div><div class="v" id="sRound"></div></div>
+            <div class="stat"><div class="l">Cassa</div><div class="v" id="sCash"></div></div>
+            <div class="stat"><div class="l">Posizione</div><div class="v" id="sRank"></div></div>
+          </div>
+        </div>
+        <div id="sRing"></div>
+      </section>
+      <div id="gameMsg"></div>
+
+      <nav class="tabs tabbar" id="tabs">
+        <button data-tab="round" class="active"><span class="ico"></span>Round</button>
+        <button data-tab="startup"><span class="ico"></span>Startup</button>
+        <button data-tab="results"><span class="ico"></span>Risultati</button>
+        <button data-tab="board"><span class="ico"></span>Classifica</button>
+        <button data-tab="market"><span class="ico"></span>Mercato</button>
+      </nav>
+
+      <section data-panel="round"><div id="roundPanel"></div></section>
+
+      <section data-panel="startup" class="hidden">
+        <div class="panel">
+          <h2>La vostra startup</h2>
+          <p class="lead" id="startupHint"></p>
+          <form id="startupForm">
+            <div class="grid2">
+              <div><label>Nome della startup</label><input name="name" maxlength="60" required></div>
+              <div><label>Categoria di prodotto</label>
+                <select name="category"><option value="abbigliamento">Abbigliamento</option><option value="accessori">Accessori</option><option value="calzature">Calzature</option><option value="gioielli">Gioielli</option><option value="pelletteria">Pelletteria</option></select></div>
+              <div><label>Segmento</label>
+                <select name="segment"><option value="premium">Fashion premium</option><option value="luxury">Luxury</option></select></div>
+              <div><label>Mercato principale</label>
+                <select name="market"><option value="EU">Europa</option><option value="US">Stati Uniti</option><option value="ASIA">Asia</option></select></div>
+            </div>
+            <label>Posizionamento <small>— chi è il cliente, cosa vi rende diversi</small></label>
+            <textarea name="positioning" maxlength="400"></textarea>
+            <label>Valori del brand</label>
+            <textarea name="values_text" maxlength="400"></textarea>
+            <p class="mt"><button type="submit">Salva startup</button></p>
+          </form>
+          <div id="startupMsg"></div>
+        </div>
+      </section>
+
+      <section data-panel="results" class="hidden"><div id="resultsPanel"></div></section>
+      <section data-panel="board" class="hidden"><div id="boardPanel"></div></section>
+      <section data-panel="market" class="hidden"><div id="marketPanel"></div></section>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/student.js"></script>
+</body>
+</html>
