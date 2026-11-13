@@ -27,9 +27,10 @@ Alla fine avrai un indirizzo web, tipo `https://business-game-demo-xxxx.onrender
 1. Vai su https://render.com e premi **Get Started**. Registrati con **GitHub**, così Render vede il tuo repository.
 2. Nella dashboard premi **New → Blueprint**.
 3. Scegli il repository `business-game`. Se non compare, premi *Configure account* e dai a Render l'accesso a quel repository.
-4. Render legge il file `render.yaml` e propone il servizio **business-game-demo** (piano Free, regione Francoforte). Ti chiede due valori:
+4. Render legge il file `render.yaml` e propone il servizio **business-game-demo** (piano Free, regione Francoforte). Ti chiede tre valori:
    - **TEACHER_EMAIL**: l'email con cui il docente entrerà (es. `docente@scuola.it`);
    - **TEACHER_PASSWORD**: una password di **almeno 10 caratteri**, scelta da te.
+   - **TEACHER_PATH**: l'indirizzo segreto dell'area docente, al posto di `/docente`. Per esempio `gestione-bg-7k2q`: da 4 a 64 caratteri, solo lettere, numeri, `-` e `_`. Se lo lasci vuoto resta `/docente`.
 5. Premi **Apply** (o *Deploy Blueprint*).
 6. Aspetta che lo stato diventi **Live**, di solito 3–5 minuti. In alto, sotto il nome del servizio, trovi l'indirizzo del sito.
 
@@ -37,14 +38,14 @@ La password resta solo nelle impostazioni segrete di Render: non è nel codice e
 
 ## 3. Prova che funzioni
 
-1. Apri `https://…onrender.com/docente` ed entra con email e password del passo 2.
+1. Apri `https://…onrender.com/docente` (o `/` + il tuo TEACHER_PATH) ed entra con email e password del passo 2.
 2. Crea una sessione di prova: compare il codice.
 3. Dal telefono, o da una finestra in incognito, apri `https://…onrender.com` e inserisci il codice.
 4. Nella dashboard premi **Avvia sessione 1**, poi apri un round: sul telefono compaiono le decisioni da prendere.
 
 ## 4. Cosa mandare al docente
 
-- **Area docente:** `https://…onrender.com/docente`
+- **Area docente:** `https://…onrender.com/docente`, oppure con il tuo TEACHER_PATH (es. `https://…onrender.com/gestione-bg-7k2q`)
 - **Email e password** scelte al passo 2, in privato
 - **Il file "Come funziona il Business Game"** (PDF), con la spiegazione del sito e del gioco
 - Due avvisi:
@@ -54,6 +55,11 @@ La password resta solo nelle impostazioni segrete di Render: non è nel codice e
 Consiglio per il docente: aprire il link 2–3 minuti prima di usarlo. Se il sito "dormiva", la prima apertura impiega circa un minuto.
 
 ---
+
+## Cambiare l'indirizzo dell'area docente
+
+Su Render apri il servizio → **Environment** → aggiungi o modifica `TEACHER_PATH` (es. `gestione-bg-7k2q`) → **Save changes**. Da quel momento `/docente` non funziona più e l'area docente si apre solo al nuovo indirizzo. Comunicalo alla docente.
+È un livello di protezione in più: chi non conosce l'indirizzo non trova nemmeno la pagina di login. La protezione vera resta comunque email + password.
 
 ## Cambiare email o password del docente
 

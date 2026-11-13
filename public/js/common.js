@@ -32,9 +32,17 @@
   const badge = (status) => { const [l, c] = STATUS[status] || [status, 'muted']; return `<span class="badge ${c}">${esc(l)}</span>`; };
   const CODE_STATUS = { active: ['Attivo', 'ok'], suspended: ['Sospeso', 'warn'], expired: ['Scaduto', 'muted'] };
   const codeBadge = (s) => { const [l, c] = CODE_STATUS[s] || [s, 'muted']; return `<span class="badge ${c}">${esc(l)}</span>`; };
-  const SEG = { premium: 'Fashion premium', luxury: 'Luxury' };
+  // Etichette del settore della partita (segmenti, canali, categorie): si aggiornano con setLabels
+  const SEG = {}, CH = {}, CAT = {};
   const MKT = { EU: 'Europa', US: 'Stati Uniti', ASIA: 'Asia' };
-  const CH = { ecommerce: 'E-commerce', boutique: 'Boutique', wholesale: 'Wholesale' };
+  function setLabels({ segments = {}, channels = {}, categories = {} } = {}) {
+    for (const [o, src] of [[SEG, segments], [CH, channels], [CAT, categories]]) {
+      for (const k of Object.keys(o)) delete o[k];
+      for (const [k, v] of Object.entries(src)) o[k] = v.label || k;
+    }
+  }
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+  const mmssPlain = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 
   // Markup del timer ad anello (SVG: niente stili inline, compatibile con la CSP)
   const R = 88, CIRC = 2 * Math.PI * R;
@@ -66,10 +74,37 @@
   // Collega un anello (o qualsiasi elemento con .time/.cap) allo stato della partita
   const timers = [];
   let tick = null;
+  // Timer del round: elemento con .rt-time e .rt-bar (facoltativa); nascosto se il round non ha durata
+  function makeRoundTimer(root, onTick) {
+    const entry = { root, onTick, base: null, kind: 'round' };
+    timers.push(entry);
+    if (!tick) tick = setInterval(() => timers.forEach(renderAny), 1000);
+    return { set(state) { entry.base = { ...state, receivedAt: Date.now() }; renderAny(entry); }, attach(el) { entry.root = el; renderAny(entry); } };
+  }
+  function roundInfo(base) {
+    const rt = base && base.roundTimer;
+    if (!rt) return null;
+    const remaining = rt.remainingMs - (base.clockRunning ? Date.now() - base.receivedAt : 0);
+    return { remaining, over: remaining < 0, left: Math.max(0, Math.min(1, remaining / rt.durationMs)), text: remaining < 0 ? '+' + mmssPlain(-remaining) : mmssPlain(remaining) };
+  }
+  function renderAny(e) { if (e.kind === 'round') renderRoundTimer(e); else renderTimer(e); }
+  function renderRoundTimer(e) {
+    if (!e.base || !e.root) return;
+    const info = roundInfo(e.base);
+    e.root.classList.toggle('hidden', !info);
+    if (info) {
+      const t = e.root.querySelector('.rt-time'); if (t) t.textContent = info.text;
+      const b = e.root.querySelector('.rt-bar i'); if (b) b.style.width = Math.round(info.left * 100) + '%';
+      const c = e.root.querySelector('.rt-cap'); if (c) c.textContent = info.over ? 'tempo del round scaduto' : (e.base.status === 'running' ? 'alla chiusura del round' : 'timer in pausa');
+      e.root.classList.toggle('over', info.over);
+    }
+    if (e.onTick) e.onTick(info, e.base);
+  }
+
   function makeTimer(root, onTick) {
     const entry = { root, onTick, base: null };
     timers.push(entry);
-    if (!tick) tick = setInterval(() => timers.forEach(renderTimer), 1000);
+    if (!tick) tick = setInterval(() => timers.forEach(renderAny), 1000);
     return { set(state) { entry.base = { ...state, receivedAt: Date.now() }; renderTimer(entry); } };
   }
   function renderTimer(e) {
@@ -93,5 +128,13 @@
     document.body.prepend(b);
   }).catch(() => {});
 
-  window.BG = { api, esc, eur, num, clock, $, $$, badge, codeBadge, SEG, MKT, CH, makeTimer, ringHTML };
+  // Euro con decimali quando servono (prezzi del food: 3,50 €)
+  const price = (n) => (n == null || isNaN(n) ? '–' : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: n < 100 && n % 1 ? 2 : 0, maximumFractionDigits: n < 100 ? 2 : 0 }).format(n));
+  const MODULES = {
+    marketReport: { label: 'Report di mercato', desc: 'Dopo ogni round i gruppi vedono grandezza del mercato, prezzo medio e quote dei concorrenti.' },
+    credit: { label: 'Fido bancario e interessi', desc: 'Se la cassa va sotto zero diventa un debito che costa l\'8% di interessi a round.' },
+    sourcing: { label: 'Dove produrre', desc: 'I gruppi scelgono se produrre in Italia, Europa o Asia: costo contro qualità, sostenibilità e rischio logistico.' },
+    awards: { label: 'Premi speciali', desc: 'Nel debriefing: strategia più sostenibile, brand più forte, miglior rimonta, previsioni più accurate…' },
+  };
+  window.BG = { api, esc, eur, num, clock, $, $$, badge, codeBadge, SEG, MKT, CH, CAT, setLabels, cap, price, MODULES, makeTimer, makeRoundTimer, ringHTML };
 })();

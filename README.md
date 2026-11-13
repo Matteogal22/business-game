@@ -4,7 +4,7 @@ Web app per condurre in aula un business game in più sessioni (default: 3 sessi
 I gruppi di studenti creano una startup fashion o luxury e competono round dopo round, mentre il docente attiva eventi geopolitici e controlla l'intera partita.
 
 - **Area studenti**: `https://tuo-sito/` – si entra solo con il codice della sessione, senza account.
-- **Area docente**: `https://tuo-sito/docente` – riservata ai docenti presenti nella allowlist del server.
+- **Area docente**: `https://tuo-sito/docente`, oppure l'indirizzo scelto con la variabile `TEACHER_PATH` – riservata ai docenti presenti nella allowlist del server.
 
 Stack: Node.js (≥ 20) + Express + SQLite (file unico, nessun servizio esterno). Frontend in HTML/JS semplice.
 
@@ -47,6 +47,7 @@ Variabili d'ambiente:
 | `NODE_ENV` | `production` (attiva i cookie `Secure`, quindi richiede HTTPS) |
 | `DB_PATH` | percorso sul disco persistente, es. `/data/business-game.sqlite` |
 | `TEACHERS_JSON` | contenuto di `config/teachers.json` |
+| `TEACHER_PATH` | indirizzo dell'area docente al posto di `/docente`, es. `gestione-bg-7k2q` (4–64 caratteri: lettere, numeri, `-`, `_`) |
 | `TRUST_PROXY` | `1` se l'hosting è dietro un proxy, come quasi sempre (serve al rate limit per IP) |
 | `PORT` | di solito impostata dall'hosting |
 
@@ -75,6 +76,25 @@ Decisioni per round: prezzo, quantità prodotta, investimenti in marketing, desi
 
 **Personalizzazione** (scheda *Impostazioni*): cassa iniziale, costi fissi, difficoltà del mercato, sensibilità green, costi di magazzino, prezzo di riferimento / elasticità / domanda / costo unitario per segmento, peso dei mercati e pesi del punteggio.
 **Eventi** (scheda *Eventi*): 9 eventi pronti (dazi USA, rallentamento Cina, crisi Mar Rosso, passaporto digitale UE, ecc.). Puoi modificarli o crearne di nuovi combinando: moltiplicatori di domanda per mercato e segmento, moltiplicatore dei costi, dazi per mercato, penalità di brand per chi è poco sostenibile, aumento della sensibilità green.
+
+## 5a. Settori, moduli e timer del round
+
+- **Settori.** Alla creazione della sessione la docente sceglie il settore, uguale per tutti i gruppi. Ci sono quattro settori pronti:
+  - **Moda & lusso**: Fashion premium / Luxury;
+  - **Beauty & cosmesi**: Masstige / Prestige;
+  - **Food & beverage**: Mass market / Gourmet;
+  - **Tech**: Consumer / Professional.
+
+  Ogni settore ha segmenti, categorie, canali, eventi e regole propri (peso di brand e qualità, velocità con cui la qualità invecchia). Le **categorie** contano davvero nel calcolo: il margine cambia il costo di produzione, il rischio invenduto decide quanta merce si perde a ogni round (es. i freschi scadono del tutto).
+- **Settori personalizzati.** La docente può creare un settore suo: nome, cosa vendono le startup, da 1 a 5 segmenti, categorie con margine e rischio invenduto, canali (vendita diretta, negozi propri, rivenditori). Si può partire da zero o copiare un settore pronto. Il settore resta salvato tra i suoi (`/api/teacher/sectors`) e le sessioni ne conservano una copia.
+- **Timer del round.** All'apertura di un round si sceglie la durata: 10, 15, 20, 30 minuti o senza limite. Il conto alla rovescia si vede nella dashboard, sul telefono degli studenti e in proiezione; si può aggiungere o togliere tempo. Allo scadere il round non si chiude da solo. Il timer segue l'orologio della lezione, quindi si ferma con la pausa.
+- **Moduli di gioco**, spenti di default. Si accendono e si spengono in qualsiasi momento, dalle Impostazioni o all'apertura di un round, e valgono dal round che si apre:
+  - **Report di mercato**: grandezza del mercato, prezzo medio e quote dei concorrenti dopo ogni round;
+  - **Fido bancario**: la cassa negativa paga l'8% di interessi a round;
+  - **Dove produrre**: Italia, Europa o Asia, cioè costo contro qualità, sostenibilità e rischio logistico;
+  - **Premi speciali** nel debriefing.
+
+  Lo storico dei moduli usati è visibile nelle Impostazioni.
 
 ## 5b. Studio dei gruppi e giudizio del docente
 

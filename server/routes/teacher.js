@@ -35,6 +35,31 @@ router.get('/games', (req, res) => {
   res.json(rows.map((r) => ({ ...r, code: auth.formatCode(r.code) })));
 });
 
+// ----- Settori: 4 pronti + quelli personalizzati della docente -----
+const { BUILTIN } = require('../sectors');
+router.get('/sectors', (req, res) => {
+  const custom = db.prepare('SELECT id, data_json FROM sectors WHERE owner_id = ? ORDER BY id').all(req.teacher.id)
+    .map((r) => ({ id: r.id, ...game.sectorSummary(`custom:${r.id}`, JSON.parse(r.data_json)) }));
+  res.json({ builtin: Object.entries(BUILTIN).map(([k, v]) => game.sectorSummary(k, v)), custom });
+});
+router.post('/sectors', (req, res) => {
+  const data = game.validateSector(req.body);
+  const { lastInsertRowid } = db.prepare('INSERT INTO sectors (owner_id, name, data_json) VALUES (?,?,?)').run(req.teacher.id, data.label, JSON.stringify(data));
+  res.status(201).json({ id: Number(lastInsertRowid), key: `custom:${lastInsertRowid}` });
+});
+router.put('/sectors/:id', (req, res) => {
+  const row = db.prepare('SELECT id FROM sectors WHERE id = ? AND owner_id = ?').get(Number(req.params.id), req.teacher.id);
+  if (!row) throw new game.GameError('Settore non trovato.', 404);
+  const data = game.validateSector(req.body);
+  db.prepare('UPDATE sectors SET name = ?, data_json = ?, updated_at = datetime(\'now\') WHERE id = ?').run(data.label, JSON.stringify(data), row.id);
+  res.json({ ok: true });
+});
+router.delete('/sectors/:id', (req, res) => {
+  const r = db.prepare('DELETE FROM sectors WHERE id = ? AND owner_id = ?').run(Number(req.params.id), req.teacher.id);
+  if (!r.changes) throw new game.GameError('Settore non trovato.', 404);
+  res.json({ ok: true }); // le partite già create conservano una copia del settore
+});
+
 router.post('/games', (req, res) => {
   const id = game.createGame(req.teacher.id, req.body || {});
   res.status(201).json({ id });
@@ -56,7 +81,7 @@ own.get('/', (req, res) => {
   for (const gr of groups) gr.vote = evals.has(gr.id) ? evals.get(gr.id) : null;
 
   const rounds = db.prepare('SELECT * FROM rounds WHERE game_id = ? ORDER BY number').all(g.id)
-    .map((r) => ({ ...r, events: game.roundEvents(r.id) }));
+    .map((r) => ({ ...r, modules: JSON.parse(r.modules_json || '{}'), events: game.roundEvents(r.id) }));
   const openRound = rounds.find((r) => r.status === 'open');
   let currentDecisions = [];
   if (openRound) {
@@ -72,7 +97,9 @@ own.get('/', (req, res) => {
 
   res.json({
     game: { id: g.id, name: g.name, numSessions: g.num_sessions, sessionMinutes: g.session_minutes, numRounds: g.num_rounds,
-      leaderboardPublic: !!g.leaderboard_public, params: JSON.parse(g.params_json) },
+      leaderboardPublic: !!g.leaderboard_public, params: game.getParams(g) },
+    awards: game.getParams(g).modules.awards ? game.awards(g) : null,
+    reports: rounds.filter((r) => r.status === 'closed' && JSON.parse(r.modules_json || '{}').marketReport).slice(-1).map((r) => ({ round: r.number, pools: game.marketReport(g, r.id) })),
     state: game.publicState(g),
     code: { code: auth.formatCode(code.code), status: code.status },
     sessions, groups, rounds, currentDecisions, events,
@@ -88,7 +115,12 @@ own.post('/state/:action', (req, res) => {
   res.json({ ok: true, state: game.publicState(req.game) });
 });
 
-own.post('/rounds/open', (req, res) => { game.openRound(req.game, (req.body || {}).eventIds); res.json({ ok: true }); });
+own.post('/rounds/open', (req, res) => {
+  const b = req.body || {};
+  game.openRound(req.game, b.eventIds, { durationMinutes: b.durationMinutes, modules: b.modules });
+  res.json({ ok: true });
+});
+own.post('/rounds/extend', (req, res) => { game.extendRound(req.game, (req.body || {}).minutes); res.json({ ok: true }); });
 own.post('/rounds/close', (req, res) => { game.closeRound(req.game); res.json({ ok: true }); });
 
 // Codice di accesso: attiva / sospendi / scaduto, oppure rigenera (il vecchio codice scade)
@@ -193,7 +225,7 @@ own.get('/final', (req, res) => res.json(game.finalRanking(req.game)));
 
 // Catalogo eventi (personalizzabile)
 own.post('/events', (req, res) => {
-  const e = game.validateEvent(req.body || {});
+  const e = game.validateEvent(req.body || {}, game.getParams(req.game));
   const { lastInsertRowid } = db.prepare('INSERT INTO events (game_id, title, description, effects_json, custom) VALUES (?,?,?,?,1)')
     .run(req.game.id, e.title, e.description, JSON.stringify(e.effects));
   log(req.game.id, 'docente', `Evento aggiunto: ${e.title}`);
@@ -202,7 +234,7 @@ own.post('/events', (req, res) => {
 own.put('/events/:eventId', (req, res) => {
   const ev = db.prepare('SELECT id FROM events WHERE id = ? AND game_id = ?').get(Number(req.params.eventId), req.game.id);
   if (!ev) throw new game.GameError('Evento non trovato.', 404);
-  const e = game.validateEvent(req.body || {});
+  const e = game.validateEvent(req.body || {}, game.getParams(req.game));
   db.prepare('UPDATE events SET title = ?, description = ?, effects_json = ? WHERE id = ?').run(e.title, e.description, JSON.stringify(e.effects), ev.id);
   res.json({ ok: true });
 });

@@ -1,12 +1,13 @@
 // Area studenti
 (function () {
-  const { api, esc, eur, num, $, $$, badge, SEG, MKT, CH, makeTimer, ringHTML } = window.BG;
+  const { api, esc, eur, num, $, $$, badge, SEG, MKT, CH, CAT, setLabels, cap, price, MODULES, makeTimer, makeRoundTimer, ringHTML } = window.BG;
   let data = null;
   let formKey = null;
   let pollTimer = null;
   let checkedCode = null;
   $('#sRing').innerHTML = ringHTML();
   const timer = makeTimer($('#sRing'));
+  const roundTimer = makeRoundTimer($('#sRoundTimer'));
 
   const show = (id) => {
     for (const s of ['join', 'pinShow', 'game']) $('#' + s).classList.toggle('hidden', s !== id);
@@ -89,8 +90,9 @@
   function render() {
     const s = data.state;
     const last = data.history[data.history.length - 1];
+    setLabels(data.market);
     $('#whoami').textContent = data.group.name;
-    $('#sGame').textContent = data.gameName;
+    $('#sGame').textContent = `${data.gameName} · ${data.market.sector.label}`;
     $('#sGroup').textContent = data.startup ? data.startup.name : data.group.name;
     $('#sSub').textContent = data.startup ? `Gruppo ${data.group.name} · ${SEG[data.startup.segment]} · ${MKT[data.startup.market]}` : `Gruppo ${data.group.name}`;
     $('#sStatus').innerHTML = badge(s.status);
@@ -99,8 +101,10 @@
     $('#sCash').textContent = eur(last ? last.cash : data.market.startingCash);
     $('#sRank').textContent = last ? last.rank + '°' : '–';
     timer.set(s);
+    roundTimer.set(s);
 
     const notices = [];
+    if (data.openRound && data.newModules && data.newModules.length) notices.push(['info', 'Novità da questo round: ' + data.newModules.map((k) => (MODULES[k] ? MODULES[k].label : k)).join(', ') + '. Trovate i dettagli nelle decisioni.']);
     if (data.codeStatus === 'expired') notices.push(['info', 'Il codice di questa sessione è scaduto: puoi consultare i risultati ma non inviare decisioni.']);
     if (s.status === 'paused') notices.push(['warn', 'Il docente ha messo in pausa la sessione. Le decisioni sono temporaneamente bloccate.']);
     if (s.status === 'session_closed') notices.push(['info', `La sessione d'aula ${s.currentSession} è chiusa. Lo stato della partita è salvato: si riprende alla prossima sessione.`]);
@@ -119,7 +123,27 @@
 
   // ---------- startup ----------
   let startupFilled = false;
+  let optionsFor = null;
+  function fillStartupOptions() {
+    const f = $('#startupForm'), m = data.market;
+    const key = m.sector.label + Object.keys(m.segments).join() + Object.keys(m.categories).join();
+    if (optionsFor === key) return;
+    optionsFor = key;
+    f.segment.innerHTML = Object.entries(m.segments).map(([k, sg]) => `<option value="${k}">${esc(sg.label)} — prezzo tipico ${price(sg.refPrice)}</option>`).join('');
+    f.category.innerHTML = Object.entries(m.categories).map(([k, c]) => `<option value="${k}">${esc(c.label)}</option>`).join('');
+    $('#sectorBox').innerHTML = `<div class="tip"><b>Settore: ${esc(m.sector.label)}.</b> ${(m.sector.rules || []).map(esc).join(' · ')}</div>`;
+    updateStartupInfo();
+  }
+  function updateStartupInfo() {
+    const f = $('#startupForm'), m = data.market;
+    const sg = m.segments[f.segment.value], c = m.categories[f.category.value];
+    const SENS = { poco: 'clienti poco sensibili al prezzo', abbastanza: 'clienti abbastanza sensibili al prezzo', molto: 'clienti molto sensibili al prezzo' };
+    $('#segInfo').innerHTML = sg ? `<span class="chip">prezzo tipico ${price(sg.refPrice)}</span><span class="chip">costo di un pezzo ${price(sg.unitCost)}</span><span class="chip">${SENS[sg.sensitivity]}</span>${sg.prestige ? '<span class="chip w">un prezzo troppo basso rovina il prestigio</span>' : ''}` : '';
+    $('#catInfo').innerHTML = c ? `<span class="chip">margine ${esc(c.margin)}</span><span class="chip ${c.spoilRate >= 0.4 ? 'w' : ''}">rischio invenduto: ${esc(c.obsolescence)}</span>` : '';
+  }
+  $('#startupForm').addEventListener('change', (e) => { if (['segment', 'category'].includes(e.target.name)) updateStartupInfo(); });
   function renderStartup() {
+    fillStartupOptions();
     const f = $('#startupForm');
     const locked = data.startupLocked;
     $('#startupHint').textContent = locked
@@ -129,6 +153,7 @@
     if (!startupFilled && data.startup) {
       for (const k of ['name', 'segment', 'category', 'market', 'positioning', 'values_text']) f[k].value = data.startup[k] || '';
       startupFilled = true;
+      updateStartupInfo();
     }
     const closed = ['debrief', 'ended'].includes(data.state.status) || data.codeStatus !== 'active';
     $$('input, select, textarea, button', f).forEach((el) => { if (closed) el.disabled = true; });
@@ -150,17 +175,12 @@
   let step = 1;
   // Stessa formula del server: investimenti con rendimenti decrescenti
   const grow = (level, spend, decay) => Math.max(0, Math.min(100, level + 12 * Math.log(1 + Math.max(0, spend) / 20000) * (1 - level / 100) - decay * level));
-  const CH_HELP = {
-    ecommerce: 'Costo fisso basso e incassate tutto il prezzo. Raggiunge bene il premium, meno il lusso.',
-    boutique: 'Costo fisso alto, ma è il canale migliore per il lusso: i clienti luxury comprano in negozio.',
-    wholesale: 'Raggiungete molti più clienti tramite negozi multimarca, ma incassate solo una parte del prezzo.',
-  };
 
   function renderRound() {
     const s = data.state;
     const r = data.openRound;
     const canSubmit = !!(r && s.status === 'running' && data.startup && data.codeStatus === 'active');
-    const key = [r ? r.number : 0, canSubmit, data.startup ? data.startup.segment : '-'].join('|');
+    const key = [r ? r.number : 0, canSubmit, data.startup ? data.startup.segment + data.startup.category : '-', JSON.stringify(data.modules || {})].join('|');
     const evThis = r ? (data.events.find((e) => e.round === r.number) || { events: [] }).events : [];
 
     if (key === formKey) { updateSaved(); renderFiles(); return; }
@@ -177,9 +197,14 @@
     }
 
     const seg = data.startup ? data.market.segments[data.startup.segment] : null;
-    const segKey = data.startup ? data.startup.segment : 'premium';
+    const segKey = data.startup ? data.startup.segment : Object.keys(data.market.segments)[0];
+    const cat = data.startup ? data.market.categories[data.startup.category] : null;
+    const word = data.market.sector.productWord || 'pezzi';
+    const mods = data.modules || {};
     const prevDec = r.decision || (data.history.length ? data.history[data.history.length - 1].decision : null);
-    const d = prevDec || (seg ? { price: seg.refPrice, production: segKey === 'luxury' ? 400 : 2000, marketing: 20000, design: 15000, sustainability: 10000, channel: 'ecommerce' } : {});
+    const firstCh = Object.keys(data.market.channels)[0];
+    const d = { sourcing: 'europa', ...(prevDec || (seg ? { price: seg.refPrice, production: Math.round((seg.baseDemand || 10000) * 0.15), marketing: 20000, design: 15000, sustainability: 10000, channel: firstCh } : {})) };
+    if (!data.market.channels[d.channel]) d.channel = firstCh;
     const last = data.history[data.history.length - 1];
     const cash = last ? last.cash : data.market.startingCash;
     const inventory = last ? last.inventory : 0;
@@ -205,16 +230,16 @@
           <p class="lead">Sotto ogni campo trovate cosa fa e l'effetto previsto.</p>
           <div class="grid3">
             <div class="kpi"><div class="label">Cassa disponibile</div><div class="value">${eur(cash)}</div></div>
-            <div class="kpi"><div class="label">In magazzino</div><div class="value">${num(inventory)} pz</div></div>
+            <div class="kpi"><div class="label">In magazzino</div><div class="value">${num(inventory)} <small>${esc(word)}</small></div></div>
             <div class="kpi"><div class="label">Brand · Qualità · Sostenibilità</div><div class="value">${num(cur.brand)} · ${num(cur.quality)} · ${num(cur.sustainability)}</div></div>
           </div>
           <div class="grid2 mt">
-            ${field('price', 'Prezzo di vendita (€)', seg ? `prezzo tipico ${esc(seg.label)}: ${eur(seg.refPrice)}` : '', numIn('price', d.price, 1),
-              segKey === 'luxury'
-                ? `<b>Cosa fa:</b> più alto = più margine su ogni pezzo, ma meno clienti. Nel lusso i clienti sono poco sensibili al prezzo, però sotto ${eur(seg ? seg.refPrice * 0.6 : 0)} il brand perde prestigio.`
-                : '<b>Cosa fa:</b> più alto = più margine su ogni pezzo, ma meno clienti. Nel premium i clienti sono molto sensibili al prezzo: anche piccoli aumenti fanno perdere vendite.', 'chip_price')}
-            ${field('production', 'Pezzi da produrre', lastDemand !== null ? `domanda per voi lo scorso round: ${num(lastDemand)} pz` : 'primo round: nessun dato sulla domanda', numIn('production', d.production, 10),
-              `<b>Cosa fa:</b> se ne producete pochi perdete vendite; se troppi, l'invenduto resta in magazzino (costa il ${Math.round((data.market.holdingCostRate || 0.1) * 100)}% del costo di un pezzo) e passa al round dopo.`, 'chip_production')}
+            ${field('price', 'Prezzo di vendita (€)', seg ? `prezzo tipico ${esc(seg.label)}: ${price(seg.refPrice)}` : '', numIn('price', d.price, 'any'),
+              seg && seg.prestige
+                ? `<b>Cosa fa:</b> più alto = più margine su ogni unità venduta, ma meno clienti. I vostri clienti sono poco sensibili al prezzo, però sotto ${price(seg.refPrice * 0.6)} il brand perde prestigio.`
+                : `<b>Cosa fa:</b> più alto = più margine, ma meno clienti. ${seg && seg.sensitivity === 'molto' ? 'I vostri clienti sono molto sensibili al prezzo: anche piccoli aumenti fanno perdere vendite.' : 'I vostri clienti sono abbastanza sensibili al prezzo.'}`, 'chip_price')}
+            ${field('production', `${cap(word)} da produrre`, lastDemand !== null ? `domanda per voi lo scorso round: ${num(lastDemand)}` : 'primo round: nessun dato sulla domanda', numIn('production', d.production, 1),
+              `<b>Cosa fa:</b> se ne producete pochi perdete vendite; se troppi, l'invenduto resta in magazzino (costa il ${Math.round((data.market.holdingCostRate || 0.1) * 100)}% del costo di produzione) e passa al round dopo.${cat && cat.spoilRate > 0 ? ` <b>Attenzione:</b> per ${esc(cat.label.toLowerCase())} ${cat.spoilRate >= 1 ? 'l\'invenduto scade e si perde tutto' : `ogni round si perde il ${Math.round(cat.spoilRate * 100)}% dell'invenduto`}.` : ''}`, 'chip_production')}
             ${field('marketing', 'Marketing (€)', `brand attuale ${num(cur.brand)}/100`, numIn('marketing', d.marketing, 1000),
               '<b>Cosa fa:</b> fa crescere la forza del brand, che attira clienti. I primi euro rendono molto, poi sempre meno. Se non investite, il brand cala un po\' ogni round.', 'chip_marketing')}
             ${field('design', 'Design / R&D (€)', `qualità attuale ${num(cur.quality)}/100`, numIn('design', d.design, 1000),
@@ -223,6 +248,8 @@
               '<b>Cosa fa:</b> i clienti premiano i brand sostenibili, e alcuni eventi (scandali, nuove leggi) penalizzano chi è sotto 40.', 'chip_sustainability')}
             ${field('channel', 'Canale di vendita', '', `<select id="f_channel" name="channel">${Object.entries(data.market.channels).map(([k, c]) => `<option value="${k}" ${d.channel === k ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>`,
               '<span id="chHelp"></span>', 'chip_channel')}
+            ${mods.sourcing ? field('sourcing', 'Dove producete', 'novità attivata dalla docente', `<select id="f_sourcing" name="sourcing">${Object.entries(data.market.sourcing).map(([k, x]) => `<option value="${k}" ${d.sourcing === k ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>`,
+              '<b>Cosa fa:</b> produrre vicino costa di più ma migliora qualità e sostenibilità; produrre lontano costa meno, ma la filiera lunga soffre di più le crisi logistiche.', 'chip_sourcing') : ''}
           </div>
           <div class="preview mt" id="preview"></div>
           <p class="row mt"><button type="button" id="toStep2" class="primary-blue">Avanti: il vostro studio →</button></p>
@@ -279,10 +306,10 @@
       const ratio = v('price') / seg.refPrice;
       const pct = Math.round((ratio - 1) * 100);
       chip('chip_price', `<span class="chip">${pct === 0 ? 'uguale al prezzo tipico' : (pct > 0 ? '+' : '') + pct + '% rispetto al prezzo tipico'}</span>` +
-        (segKey === 'luxury' && ratio < 0.6 ? '<span class="chip w">Troppo basso per il lusso: il brand perde prestigio</span>' : '') +
-        (segKey === 'premium' && ratio > 1.3 ? '<span class="chip w">Molto sopra il tipico: nel premium perderete molti clienti</span>' : ''));
+        (seg.prestige && ratio < 0.6 ? '<span class="chip w">Troppo basso: il brand perde prestigio</span>' : '') +
+        (seg.sensitivity === 'molto' && ratio > 1.3 ? '<span class="chip w">Molto sopra il tipico: i vostri clienti sono sensibili al prezzo</span>' : ''));
       const avail = v('production') + inventory;
-      chip('chip_production', `<span class="chip">Pezzi disponibili da vendere: ${num(avail)}${inventory ? ` (di cui ${num(inventory)} in magazzino)` : ''}</span>` +
+      chip('chip_production', `<span class="chip">${esc(cap(word))} disponibili da vendere: ${num(avail)}${inventory ? ` (di cui ${num(inventory)} in magazzino)` : ''}</span>` +
         (lastDemand !== null && avail < lastDemand * 0.7 ? '<span class="chip w">Molto sotto la domanda dello scorso round: rischio vendite perse</span>' : '') +
         (lastDemand !== null && avail > lastDemand * 1.6 ? '<span class="chip w">Molto sopra la domanda dello scorso round: rischio invenduto</span>' : ''));
       const trend = (a, b) => `${num(a)} → ${num(b)}`;
@@ -290,13 +317,19 @@
       chip('chip_design', `<span class="chip ${nq >= cur.quality ? 'g' : 'w'}">Qualità prevista: ${trend(cur.quality, nq)}</span>`);
       chip('chip_sustainability', `<span class="chip ${ns >= cur.sustainability ? 'g' : 'w'}">Sostenibilità prevista: ${trend(cur.sustainability, ns)}</span>` +
         (ns < 40 ? '<span class="chip w">Sotto 40: rischio penalità con eventi sulla filiera</span>' : ''));
-      $('#chHelp').innerHTML = `<b>Cosa fa:</b> ${CH_HELP[f.channel.value] || ''}`;
+      $('#chHelp').innerHTML = `<b>Cosa fa:</b> ${esc((data.market.channels[f.channel.value] || {}).desc || '')}`;
+      const src = mods.sourcing && f.sourcing ? data.market.sourcing[f.sourcing.value] : null;
+      if (src) chip('chip_sourcing', `<span class="chip ${src.cost > 1 ? 'w' : 'g'}">costo di produzione ${src.cost > 1 ? '+' : '−'}${Math.round(Math.abs(src.cost - 1) * 100)}%</span><span class="chip ${src.quality >= 0 ? 'g' : 'w'}">qualità ${src.quality >= 0 ? '+' : ''}${src.quality} a round</span><span class="chip ${src.sustainability >= 0 ? 'g' : 'w'}">sostenibilità ${src.sustainability >= 0 ? '+' : ''}${src.sustainability} a round</span><span class="chip ${src.eventExposure > 1 ? 'w' : ''}">rischio crisi logistiche: ${src.eventExposure > 1 ? 'alto' : src.eventExposure < 1 ? 'basso' : 'medio'}</span>`);
       const reach = (data.market.channelReach[f.channel.value] || {})[segKey] || 1;
       chip('chip_channel', `<span class="chip">Costo fisso ${eur(ch.fixedCost || 0)} a round</span><span class="chip">Incassate il ${Math.round((ch.priceShare ?? 1) * 100)}% del prezzo</span><span class="chip ${reach >= 1 ? 'g' : 'w'}">Clienti raggiunti: ${reach >= 1 ? '+' : ''}${Math.round((reach - 1) * 100)}%</span>`);
-      const spend = v('production') * seg.unitCost * (1 + (nq - 50) / 150) * (1 + (ns - 50) / 300) + v('marketing') + v('design') + v('sustainability') + data.market.fixedCostPerRound + (ch.fixedCost || 0);
+      const MARGIN = { basso: 1.15, medio: 1, alto: 0.85, molto_alto: 0.7 };
+      const unit = seg.unitCost * (cat ? MARGIN[cat.marginKey] || 1 : 1) * (src ? src.cost : 1) * (1 + (nq - 50) / 150) * (1 + (ns - 50) / 300);
+      const spend = v('production') * unit + v('marketing') + v('design') + v('sustainability') + data.market.fixedCostPerRound + (ch.fixedCost || 0);
       const maxRev = avail * v('price') * (ch.priceShare ?? 1);
       $('#preview').innerHTML = `<div class="pv-row"><span>Uscite stimate del round</span><b>${eur(spend)}</b></div>
+        <div class="pv-row"><span>Costo di produzione per unità</span><b>${price(unit)}</b></div>
         <div class="pv-row"><span>Cassa dopo le uscite</span><b class="${cash - spend < 0 ? 'neg' : ''}">${eur(cash - spend)}</b></div>
+        ${mods.credit && cash - spend < 0 ? `<div class="pv-row"><span>Se a fine round la cassa resta negativa: interessi del fido (${Math.round(data.market.creditRate * 100)}%)</span><b class="neg">circa ${eur((spend - cash) * data.market.creditRate)}</b></div>` : ''}
         <div class="pv-row"><span>Ricavo se vendete tutti i pezzi</span><b>${eur(maxRev)}</b></div>
         <small>Stime indicative: il risultato vero dipende dai concorrenti e dagli eventi.</small>`;
     };
@@ -328,6 +361,7 @@
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(['price', 'production', 'marketing', 'design', 'sustainability', 'channel'].map((k) => [k, f[k].value]));
+      if (f.sourcing) body.sourcing = f.sourcing.value;
       const analysis = Object.fromEntries(['market', 'competitors', 'strategy', 'risks', 'forecast_units', 'forecast_profit'].map((k) => [k, f[k].value]));
       try {
         await api('PUT', '/api/student/decision', body);
@@ -373,7 +407,7 @@
       <div class="tip mt"><b>In sintesi:</b> il vostro punto forte è <b>${PART_LABEL[best[0]].toLowerCase()}</b>, quello debole è <b>${PART_LABEL[worst[0]].toLowerCase()}</b>.
         Ogni voce vi confronta con gli altri gruppi: il migliore prende 100, il peggiore 0. Migliorare la voce più debole è il modo più rapido per salire.</div>
       ${last.analysis && (last.analysis.forecast_units != null || last.analysis.forecast_profit != null) ? `<h3 class="mt">La vostra previsione e il risultato reale</h3><div class="grid2">
-        ${last.analysis.forecast_units != null ? `<div class="kpi"><div class="label">Pezzi venduti: previsti → reali</div><div class="value">${num(last.analysis.forecast_units)} → ${num(last.units_sold)}</div></div>` : ''}
+        ${last.analysis.forecast_units != null ? `<div class="kpi"><div class="label">${esc(cap(data.market.sector.productWord))} venduti: previsti → reali</div><div class="value">${num(last.analysis.forecast_units)} → ${num(last.units_sold)}</div></div>` : ''}
         ${last.analysis.forecast_profit != null ? `<div class="kpi"><div class="label">Utile: previsto → reale</div><div class="value">${eur(last.analysis.forecast_profit)} → ${eur(last.profit)}</div></div>` : ''}
       </div>` : ''}
     </div>`;
@@ -386,9 +420,10 @@
       <div class="hero-stats"><div class="stat"><div class="l">Punteggio finale</div><div class="v">${ev.finalScore != null ? num(ev.finalScore, 1) : '–'}</div></div>
       <div class="stat"><div class="l">Posizione finale</div><div class="v">${ev.finalRank ? ev.finalRank + '°' : '–'}</div></div>
       <div class="stat"><div class="l">Peso del giudizio</div><div class="v">${Math.round(ev.weight * 100)}%</div></div></div></div>` : '';
-    if (!h.length) { $('#resultsPanel').innerHTML = evHtml + '<div class="panel"><p class="muted">I risultati compaiono quando la docente chiude e calcola un round.</p></div>'; return; }
+    const aw = awardsHTML();
+    if (!h.length) { $('#resultsPanel').innerHTML = evHtml + aw + '<div class="panel"><p class="muted">I risultati compaiono quando la docente chiude e calcola un round.</p></div>'; return; }
     const last = h[h.length - 1];
-    $('#resultsPanel').innerHTML = evHtml + scoreExplain(last) + `
+    $('#resultsPanel').innerHTML = evHtml + aw + scoreExplain(last) + `
       <div class="panel"><h2>Situazione dopo il round ${last.round}</h2>
         <div class="grid3">
           <div class="kpi"><div class="label">Cassa</div><div class="value">${eur(last.cash)}</div></div>
@@ -400,19 +435,25 @@
         </div>
       </div>
       <div class="panel"><h2>Storico per round</h2><div class="table-wrap"><table>
-        <thead><tr><th>Round</th><th class="n">Prezzo</th><th class="n">Prodotti</th><th class="n">Venduti</th><th class="n">Vendite perse</th><th class="n">Ricavi</th><th class="n">Costi</th><th class="n">Utile</th><th class="n">Cassa</th><th class="n">Punteggio</th><th class="n">Pos.</th></tr></thead>
-        <tbody>${h.map((r) => `<tr><td>${r.round}${r.auto ? ' <small>(auto)</small>' : ''}</td><td class="n">${eur(r.decision && r.decision.price)}</td><td class="n">${num(r.decision && r.decision.production)}</td>
-          <td class="n">${num(r.units_sold)}</td><td class="n">${num(r.lost_sales)}</td><td class="n">${eur(r.revenue)}</td><td class="n">${eur(r.total_costs)}</td>
-          <td class="n">${eur(r.profit)}</td><td class="n">${eur(r.cash)}</td><td class="n">${num(r.score, 1)}</td><td class="n">${r.rank}°</td></tr>`).join('')}</tbody>
-      </table></div><p class="muted"><small>"Vendite perse": clienti che volevano comprare ma i pezzi erano finiti. "(auto)": decisione ripetuta perché non inviata in tempo.</small></p></div>`;
+        <thead><tr><th>Round</th><th class="n">Prezzo</th><th class="n">Prodotti</th><th class="n">Venduti</th><th class="n">Vendite perse</th><th class="n">Invenduto perso</th><th class="n">Ricavi</th><th class="n">Costi</th><th class="n">Utile</th><th class="n">Cassa</th><th class="n">Punteggio</th><th class="n">Pos.</th></tr></thead>
+        <tbody>${h.map((r) => `<tr><td>${r.round}${r.auto ? ' <small>(auto)</small>' : ''}</td><td class="n">${price(r.decision && r.decision.price)}</td><td class="n">${num(r.decision && r.decision.production)}</td>
+          <td class="n">${num(r.units_sold)}</td><td class="n">${num(r.lost_sales)}</td><td class="n">${num(r.details.spoiled || 0)}</td><td class="n">${eur(r.revenue)}</td><td class="n">${eur(r.total_costs)}</td>
+          <td class="n">${eur(r.profit)}</td><td class="n">${eur(r.cash)}${r.details.interest ? `<br><small class="muted">interessi ${eur(r.details.interest)}</small>` : ''}</td><td class="n">${num(r.score, 1)}</td><td class="n">${r.rank}°</td></tr>`).join('')}</tbody>
+      </table></div><p class="muted"><small>"Vendite perse": clienti che volevano comprare ma la produzione era finita. "Invenduto perso": la parte di magazzino che è passata di stagione, scaduta o diventata obsoleta. "(auto)": decisione ripetuta perché non inviata in tempo.</small></p></div>`;
     $$('#resultsPanel .bar i').forEach((i) => { i.style.width = Math.max(2, Number(i.dataset.w)) + '%'; });
+  }
+
+  function awardsHTML() {
+    if (!data.awards || !data.awards.length) return '';
+    return `<div class="panel"><h2>Premi speciali</h2><div class="awards">${data.awards.map((a) => `<div class="award ${a.winner && data.startup && a.winner.startupName === data.startup.name ? 'me' : ''}">
+      <span class="aw-ico">★</span><div><b>${esc(a.label)}</b><span>${esc(a.winner ? a.winner.startupName : '–')} · ${esc(a.value)}</span><small>${esc(a.desc)}</small></div></div>`).join('')}</div></div>`;
   }
 
   function renderBoard() {
     const b = data.leaderboard;
     if (!b) { $('#boardPanel').innerHTML = '<div class="panel"><p class="muted">La docente ha scelto di non mostrare la classifica durante il gioco.</p></div>'; return; }
     if (!b.rows.length) { $('#boardPanel').innerHTML = '<div class="panel"><p class="muted">La classifica comparirà dopo il primo round calcolato.</p></div>'; return; }
-    $('#boardPanel').innerHTML = `<div class="panel"><h2>${b.final ? 'Classifica finale' : `Classifica dopo il round ${b.round}`}</h2><div class="table-wrap"><table>
+    $('#boardPanel').innerHTML = awardsHTML() + `<div class="panel"><h2>${b.final ? 'Classifica finale' : `Classifica dopo il round ${b.round}`}</h2><div class="table-wrap"><table>
       <thead><tr><th>#</th><th>Startup</th><th>Gruppo</th><th>Mercato</th>${b.final ? '<th class="n">Gioco</th>' : ''}<th class="n">${b.final ? 'Finale' : 'Punteggio'}</th></tr></thead>
       <tbody>${b.rows.map((r) => `<tr class="${r.isMe ? 'me' : ''}"><td><strong>${r.rank}</strong></td><td>${esc(r.startupName)}<br><small>${esc(SEG[r.segment] || r.segment)}</small></td><td>${esc(r.groupName)}</td><td>${esc(MKT[r.market] || r.market)}</td>${b.final ? `<td class="n">${num(r.gameScore, 1)}</td>` : ''}<td class="n"><strong>${num(r.score, 1)}</strong></td></tr>`).join('')}</tbody>
     </table></div><p class="muted"><small>${b.final ? `Punteggio finale = ${100 - Math.round(b.weight * 100)}% risultati del gioco + ${Math.round(b.weight * 100)}% giudizio della docente sul ragionamento.` : 'Il punteggio combina utile cumulato, brand, quota di mercato, sostenibilità e cassa, confrontati con gli altri gruppi. Alla fine si aggiunge il giudizio della docente.'}</small></p></div>`;
@@ -420,10 +461,19 @@
 
   function renderMarket() {
     const ev = [...data.events].reverse();
-    $('#marketPanel').innerHTML = `
+    const rep = data.reports && data.reports[0];
+    const mine = data.startup ? data.startup.segment + '|' + data.startup.market : '';
+    const reportHTML = rep ? `<div class="panel"><h2>Report di mercato · round ${rep.round}</h2>
+      <p class="lead">I dati che un manager troverebbe in un'analisi di settore. Il vostro mercato è evidenziato.</p>
+      ${rep.pools.map((p) => `<div class="report ${p.segment + '|' + p.market === mine ? 'mine' : ''}"><div class="row"><b>${esc(p.segmentLabel)} · ${esc(MKT[p.market])}</b><span class="spacer"></span>
+        <span class="chip">clienti ${num(p.demand)}</span><span class="chip">venduti ${num(p.sold)}</span>${p.unserved ? `<span class="chip w">senza prodotto: ${num(p.unserved)}</span>` : ''}<span class="chip">prezzo medio ${price(p.avgPrice)}</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Startup</th><th class="n">Quota</th><th class="n">Prezzo</th><th>Canale</th></tr></thead><tbody>
+        ${p.players.map((x) => `<tr class="${data.startup && x.startupName === data.startup.name ? 'me' : ''}"><td>${esc(x.startupName)}</td><td class="n">${num(x.share, 1)}%</td><td class="n">${price(x.price)}</td><td>${esc(x.channel || '–')}</td></tr>`).join('')}</tbody></table></div></div>`).join('')}
+      <p class="muted"><small>"Senza prodotto": clienti che avrebbero comprato, ma nessuno aveva abbastanza ${esc(data.market.sector.productWord)}. Quota = venduti sul totale dei clienti del mercato.</small></p></div>` : '';
+    $('#marketPanel').innerHTML = reportHTML + `
       <div class="panel"><h2>Startup concorrenti</h2>
         ${data.competitors.length ? `<div class="table-wrap"><table><thead><tr><th>Startup</th><th>Segmento</th><th>Categoria</th><th>Mercato</th><th>Posizionamento</th></tr></thead><tbody>
-        ${data.competitors.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(SEG[c.segment])}</td><td>${esc(c.category)}</td><td>${esc(MKT[c.market])}</td><td>${esc(c.positioning)}</td></tr>`).join('')}
+        ${data.competitors.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(SEG[c.segment] || c.segment)}</td><td>${esc(CAT[c.category] || c.category)}</td><td>${esc(MKT[c.market])}</td><td>${esc(c.positioning)}</td></tr>`).join('')}
         </tbody></table></div>` : '<p class="muted">Nessun\'altra startup registrata finora.</p>'}
         <p class="muted"><small>Competete direttamente con le startup che hanno scelto lo stesso segmento e lo stesso mercato.</small></p>
       </div>

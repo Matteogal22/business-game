@@ -5,7 +5,8 @@ const express = require('express');
 const { db, log } = require('../db');
 const auth = require('../auth');
 const game = require('../game');
-const { DEFAULT_PARAMS } = require('../defaults');
+const { DEFAULT_PARAMS, SOURCING, CREDIT } = require('../defaults');
+const { MARGIN_LABEL, OBSOLESCENCE_LABEL, OBSOLESCENCE } = require('../sectors');
 const att = require('../attachments');
 
 const router = express.Router();
@@ -72,7 +73,7 @@ router.use(auth.requireGroup);
 
 router.get('/state', (req, res) => {
   const g = db.prepare('SELECT * FROM games WHERE id = ?').get(req.group.game_id);
-  const params = JSON.parse(g.params_json);
+  const params = game.getParams(g);
   const state = game.publicState(g);
   const members = db.prepare('SELECT name FROM group_members WHERE group_id = ?').all(req.group.id).map((m) => m.name);
   const startup = db.prepare('SELECT name, segment, category, market, positioning, values_text FROM startups WHERE group_id = ?').get(req.group.id) || null;
@@ -133,14 +134,22 @@ router.get('/state', (req, res) => {
       files: filesOf(openRound.number),
     } : null,
     history, competitors, events, leaderboard: board, evaluation,
+    modules: state.roundModules || params.modules,
+    newModules: newModulesFor(g, openRound),
+    reports: rounds.filter((r) => r.status === 'closed' && JSON.parse(db.prepare('SELECT modules_json FROM rounds WHERE id = ?').get(r.id).modules_json || '{}').marketReport)
+      .slice(-3).reverse().map((r) => ({ round: r.number, pools: game.marketReport(g, r.id) })),
+    awards: params.modules.awards && ['debrief', 'ended'].includes(state.status) ? game.awards(g) : null,
     limits: { maxFileMb: att.MAX_BYTES / 1048576, maxFiles: att.MAX_PER_ROUND },
     market: { // informazioni di mercato pubbliche per decidere
-      segments: Object.fromEntries(Object.entries(params.segments).map(([k, s]) => [k, { label: s.label, refPrice: s.refPrice, unitCost: s.unitCost }])),
+      sector: { label: params.sector.label, productWord: params.sector.productWord, rules: params.sector.rules },
+      segments: Object.fromEntries(Object.entries(params.segments).map(([k, s]) => [k, { label: s.label, refPrice: s.refPrice, unitCost: s.unitCost, baseDemand: s.baseDemand, prestige: s.elasticity < 0.8, sensitivity: s.elasticity < 0.8 ? 'poco' : s.elasticity < 1.3 ? 'abbastanza' : 'molto' }])),
+      categories: Object.fromEntries(Object.entries(params.categories).map(([k, c]) => [k, { label: c.label, margin: MARGIN_LABEL[c.margin] || c.margin, obsolescence: OBSOLESCENCE_LABEL[c.obsolescence] || c.obsolescence, spoilRate: OBSOLESCENCE[c.obsolescence] ?? 0.25, marginKey: c.margin }])),
       markets: Object.fromEntries(Object.entries(params.markets).map(([k, m]) => [k, { label: m.label }])),
-      channels: Object.fromEntries(Object.entries(params.channels || DEFAULT_PARAMS.channels).map(([k, c]) => [k, { label: c.label, fixedCost: c.fixedCost, priceShare: c.priceShare }])),
+      channels: Object.fromEntries(Object.entries(params.channels).map(([k, c]) => [k, { label: c.label, desc: c.desc || '', fixedCost: c.fixedCost, priceShare: c.priceShare }])),
+      sourcing: SOURCING, creditRate: CREDIT.interestRate, weights: params.weights,
       fixedCostPerRound: params.fixedCostPerRound, startingCash: params.startingCash,
       start: params.start, decay: params.decay, holdingCostRate: params.holdingCostRate,
-      channelReach: Object.fromEntries(Object.entries(params.channels || DEFAULT_PARAMS.channels).map(([k, c]) => [k, c.reach])),
+      channelReach: Object.fromEntries(Object.entries(params.channels).map(([k, c]) => [k, c.reach])),
     },
   });
 });
@@ -149,7 +158,7 @@ router.put('/startup', (req, res) => {
   const st = game.getStateRow(req.group.game_id);
   if (['debrief', 'ended'].includes(st.status)) throw new game.GameError('La partita è conclusa.');
   if (req.codeStatus !== 'active') throw new game.GameError('Il codice non è attivo.', 403);
-  const s = game.validateStartup(req.body || {});
+  const s = game.validateStartup(req.body || {}, game.getParams(db.prepare('SELECT * FROM games WHERE id = ?').get(req.group.game_id)));
   const existing = db.prepare('SELECT * FROM startups WHERE group_id = ?').get(req.group.id);
   const locked = !!db.prepare('SELECT 1 FROM kpis WHERE group_id = ?').get(req.group.id);
   if (existing && locked && (existing.segment !== s.segment || existing.market !== s.market)) {
@@ -164,6 +173,15 @@ router.put('/startup', (req, res) => {
   log(req.group.game_id, `gruppo:${req.group.id}`, existing ? 'Startup aggiornata' : `Startup creata: ${s.name}`);
   res.json({ ok: true });
 });
+
+// Moduli accesi in questo round che nel round precedente erano spenti: per l'avviso "Novità da questo round"
+function newModulesFor(g, openRound) {
+  if (!openRound) return [];
+  const cur = JSON.parse(db.prepare('SELECT modules_json FROM rounds WHERE id = ?').get(openRound.id).modules_json || '{}');
+  const prevRow = db.prepare('SELECT modules_json FROM rounds WHERE game_id = ? AND number = ?').get(g.id, openRound.number - 1);
+  const prev = prevRow ? JSON.parse(prevRow.modules_json || '{}') : {};
+  return Object.keys(cur).filter((k) => cur[k] && !prev[k]);
+}
 
 function analysisOut(a) {
   if (!a) return null;
@@ -227,7 +245,9 @@ router.put('/decision', (req, res) => {
   const round = db.prepare('SELECT id FROM rounds WHERE game_id = ? AND status = \'open\'').get(req.group.game_id);
   if (!round) throw new game.GameError('Nessun round aperto in questo momento.');
   if (!db.prepare('SELECT 1 FROM startups WHERE group_id = ?').get(req.group.id)) throw new game.GameError('Configura prima la tua startup.');
-  const d = game.validateDecision(req.body || {});
+  const g = db.prepare('SELECT * FROM games WHERE id = ?').get(req.group.game_id);
+  const rmods = JSON.parse(db.prepare('SELECT modules_json FROM rounds WHERE id = ?').get(round.id).modules_json || '{}');
+  const d = game.validateDecision(req.body || {}, game.getParams(g), rmods);
   db.prepare(`INSERT INTO decisions (round_id, group_id, payload_json, auto, updated_at) VALUES (?,?,?,0,?)
     ON CONFLICT(round_id, group_id) DO UPDATE SET payload_json = excluded.payload_json, auto = 0, updated_at = excluded.updated_at`)
     .run(round.id, req.group.id, JSON.stringify(d), Date.now());

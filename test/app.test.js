@@ -328,6 +328,86 @@ test('giudizio finale: solo la docente, visibile agli studenti solo alla fine, r
   assert.equal((await prof2('PUT', `/api/teacher/games/${gid}/groups/${idOf('A')}/evaluation`, { vote: 5 })).status, 404);
 });
 
+test('settori: 4 pronti, settore personalizzato privato della docente', async () => {
+  const sec = (await prof('GET', '/api/teacher/sectors')).data;
+  assert.deepEqual(sec.builtin.map((x) => x.key), ['moda', 'beauty', 'food', 'tech']);
+  const bad = { name: 'Sport', productWord: 'articoli', segments: [{ label: 'Amatori', refPrice: 50, unitCost: 60, baseDemand: 1000, sensitivity: 'molto' }],
+    categories: [{ label: 'Scarpe', margin: 'medio', obsolescence: 'medio' }], channels: [{ label: 'Online', type: 'diretto' }] };
+  assert.equal((await prof('POST', '/api/teacher/sectors', bad)).status, 400); // costo >= prezzo
+  assert.equal((await prof('POST', '/api/teacher/sectors', { ...bad, segments: [] })).status, 400);
+  const good = { ...bad, copyFrom: 'moda', segments: [
+    { label: 'Amatori', refPrice: 90, unitCost: 32, baseDemand: 15000, sensitivity: 'molto' },
+    { label: 'Professionisti', refPrice: 420, unitCost: 150, baseDemand: 3000, sensitivity: 'poco' },
+    { label: 'Outdoor estremo', refPrice: 700, unitCost: 260, baseDemand: 900, sensitivity: 'poco' }],
+    channels: [{ label: 'Online', type: 'diretto' }, { label: 'Negozi sportivi', type: 'rivenditori' }] };
+  const created = await prof('POST', '/api/teacher/sectors', good);
+  assert.equal(created.status, 201);
+  // un altro docente non lo vede e non può usarlo
+  assert.equal((await prof2('GET', '/api/teacher/sectors')).data.custom.length, 0);
+  assert.equal((await prof2('POST', '/api/teacher/games', { name: 'X', sector: created.data.key })).status, 400);
+  assert.equal((await prof2('DELETE', `/api/teacher/sectors/${created.data.id}`)).status, 404);
+  // partita con il settore personalizzato
+  const gid = (await prof('POST', '/api/teacher/games', { name: 'Sport', sector: created.data.key })).data.id;
+  const det = (await prof('GET', `/api/teacher/games/${gid}`)).data;
+  assert.equal(det.game.params.sector.label, 'Sport');
+  assert.deepEqual(Object.keys(det.game.params.segments), ['s1', 's2', 's3']);
+  const st = client();
+  await st('POST', '/api/student/join', { code: det.code.code, groupName: 'Run' });
+  assert.equal((await st('PUT', '/api/student/startup', { name: 'Runner', segment: 'premium', category: 'c1', market: 'EU' })).status, 400);
+  assert.equal((await st('PUT', '/api/student/startup', { name: 'Runner', segment: 's3', category: 'c1', market: 'EU' })).status, 200);
+  const ss = (await st('GET', '/api/student/state')).data;
+  assert.equal(ss.market.sector.productWord, 'articoli');
+  assert.equal(ss.market.segments.s3.prestige, true);
+});
+
+test('settore food, moduli e timer del round', async () => {
+  const gid = (await prof('POST', '/api/teacher/games', { name: 'Food', sector: 'food', numRounds: 3, params: { preset: 'facile' } })).data.id;
+  let det = (await prof('GET', `/api/teacher/games/${gid}`)).data;
+  assert.equal(det.game.params.preset, 'facile');
+  assert.equal(det.game.params.startingCash, 700000);
+  assert.equal(det.game.params.segments.mass.baseDemand, Math.round(700000 * 1.15));
+  assert.ok(det.events.some((e) => e.title === 'Siccità in Europa'));
+  const a = client(), b = client();
+  await a('POST', '/api/student/join', { code: det.code.code, groupName: 'A' });
+  await b('POST', '/api/student/join', { code: det.code.code, groupName: 'B' });
+  assert.equal((await a('PUT', '/api/student/startup', { name: 'Orto', segment: 'luxury', category: 'freschi', market: 'EU' })).status, 400);
+  assert.equal((await a('PUT', '/api/student/startup', { name: 'Orto', segment: 'gourmet', category: 'freschi', market: 'EU' })).status, 200);
+  await b('PUT', '/api/student/startup', { name: 'Crunchy', segment: 'mass', category: 'snack', market: 'EU' });
+  await prof('POST', `/api/teacher/games/${gid}/state/start`);
+  assert.equal((await prof('POST', `/api/teacher/games/${gid}/rounds/open`, { durationMinutes: 999 })).status, 400);
+  assert.equal((await prof('POST', `/api/teacher/games/${gid}/rounds/open`, { durationMinutes: 15, modules: { sourcing: true, credit: true, marketReport: true } })).status, 200);
+  let sa = (await a('GET', '/api/student/state')).data;
+  assert.equal(sa.state.roundTimer.durationMs, 15 * 60000);
+  assert.ok(sa.modules.sourcing && sa.newModules.includes('sourcing'));
+  await prof('POST', `/api/teacher/games/${gid}/rounds/extend`, { minutes: 5 });
+  assert.equal((await a('GET', '/api/student/state')).data.state.roundTimer.durationMs, 20 * 60000);
+  const dec = { price: 12, production: 30000, marketing: 30000, design: 20000, sustainability: 20000, channel: 'specializzati' };
+  assert.equal((await a('PUT', '/api/student/decision', dec)).status, 400); // manca il luogo di produzione
+  assert.equal((await a('PUT', '/api/student/decision', { ...dec, channel: 'boutique', sourcing: 'italia' })).status, 400);
+  assert.equal((await a('PUT', '/api/student/decision', { ...dec, sourcing: 'italia' })).status, 200);
+  // B spende troppo: cassa negativa → interessi del fido
+  assert.equal((await b('PUT', '/api/student/decision', { price: 3.5, production: 3000000, marketing: 2000000, design: 0, sustainability: 0, channel: 'gdo', sourcing: 'asia' })).status, 200);
+  await prof('POST', `/api/teacher/games/${gid}/rounds/close`);
+  sa = (await a('GET', '/api/student/state')).data;
+  const sb = (await b('GET', '/api/student/state')).data;
+  assert.equal(sa.history[0].inventory, 0); // i freschi invenduti scadono tutti
+  assert.ok(sb.history[0].cash < 0 && sb.history[0].details.interest > 0);
+  assert.equal(sa.reports.length, 1);
+  assert.ok(sa.reports[0].pools.some((p) => p.segment === 'gourmet' && p.players[0].startupName === 'Orto'));
+  // round 2 senza moduli: niente luogo di produzione richiesto
+  await prof('POST', `/api/teacher/games/${gid}/rounds/open`, { modules: { sourcing: false, credit: false, marketReport: false } });
+  assert.equal((await a('GET', '/api/student/state')).data.state.roundTimer, null);
+  assert.equal((await a('PUT', '/api/student/decision', dec)).status, 200);
+  await prof('POST', `/api/teacher/games/${gid}/rounds/close`);
+  // premi speciali in debriefing
+  await prof('PATCH', `/api/teacher/games/${gid}`, { params: { modules: { awards: true } } });
+  await prof('POST', `/api/teacher/games/${gid}/state/debrief`);
+  const fin = (await a('GET', '/api/student/state')).data;
+  assert.ok(Array.isArray(fin.awards) && fin.awards.length >= 3);
+  det = (await prof('GET', `/api/teacher/games/${gid}`)).data;
+  assert.deepEqual(det.rounds.map((r) => !!r.modules.sourcing), [true, false]);
+});
+
 test('logout docente invalida la sessione', async () => {
   await prof('POST', '/api/teacher/logout');
   assert.equal((await prof('GET', '/api/teacher/games')).status, 401);

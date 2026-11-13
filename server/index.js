@@ -29,23 +29,37 @@ app.use('/api/teacher', require('./routes/teacher'));
 app.use('/api/student', require('./routes/student'));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Risorsa non trovata.' }));
 
-// Area docente: la pagina della dashboard viene servita solo a un docente autenticato e autorizzato.
+// Area docente: l'indirizzo si sceglie con la variabile TEACHER_PATH (es. "gestione-bg-7k2q").
+// Senza variabile resta /docente. L'indirizzo è solo un livello in più: la protezione vera è il login.
+const fs = require('fs');
+const RESERVED = ['api', 'css', 'js', 'healthz', 'index.html'];
+function teacherPath() {
+  const raw = String(process.env.TEACHER_PATH || 'docente').trim().replace(/^\/+|\/+$/g, '');
+  if (!/^[A-Za-z0-9_-]{4,64}$/.test(raw) || RESERVED.includes(raw.toLowerCase())) {
+    console.error(`ERRORE: TEACHER_PATH "${raw}" non valido. Usa da 4 a 64 caratteri tra lettere, numeri, "-" e "_".`);
+    process.exit(1);
+  }
+  return '/' + raw;
+}
+const TP = teacherPath();
 const views = path.join(__dirname, 'views');
-app.use('/docente', (req, res, next) => {
+// Le pagine docente contengono l'indirizzo dello script: lo si inserisce al volo
+const page = (file) => fs.readFileSync(path.join(views, file), 'utf8').replace(/__TEACHER_PATH__/g, TP);
+app.use(TP, (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   next();
 });
-app.get(['/docente', '/docente/'], (req, res) => {
-  res.sendFile(path.join(views, auth.getTeacher(req) ? 'teacher-dashboard.html' : 'teacher-login.html'));
+app.get([TP, TP + '/'], (req, res) => {
+  res.type('html').send(page(auth.getTeacher(req) ? 'teacher-dashboard.html' : 'teacher-login.html'));
 });
 // Anche il codice della dashboard viene servito solo al docente autorizzato:
 // uno studente non può nemmeno scaricare l'interfaccia di amministrazione.
-app.get('/docente/app.js', (req, res) => {
+app.get(TP + '/app.js', (req, res) => {
   if (!auth.getTeacher(req)) return res.status(404).type('text/plain').send('Non trovato');
-  res.type('application/javascript').sendFile(path.join(views, 'teacher-app.js'));
+  res.type('application/javascript').send(page('teacher-app.js'));
 });
-app.use('/docente', (req, res) => res.status(404).type('text/plain').send('Non trovato'));
+app.use(TP, (req, res) => res.status(404).type('text/plain').send('Non trovato'));
 
 // Area studenti
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html' }));
@@ -70,7 +84,7 @@ function start(port = Number(process.env.PORT) || 3000) {
   if (!n) console.warn('ATTENZIONE: nessun docente in allowlist. Crea config/teachers.json (vedi README).');
   // Ricarica la allowlist ogni minuto: rimuovere un docente dal file revoca l'accesso senza riavvio
   setInterval(() => { try { auth.syncTeachers(); } catch (e) { console.error('Allowlist non valida:', e.message); } }, 60000).unref();
-  return app.listen(port, () => console.log(`Business game su http://localhost:${port}  (area docente: /docente)`));
+  return app.listen(port, () => console.log(`Business game su http://localhost:${port}  (area docente: ${TP})`));
 }
 
 if (require.main === module) start();

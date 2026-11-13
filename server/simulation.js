@@ -1,16 +1,17 @@
-// Motore di simulazione: funzione pura, nessun accesso al database.
-// Input: parametri della partita, stato precedente di ogni gruppo, decisioni del round, eventi attivi.
-// Output: nuovi KPI per gruppo + punteggio e classifica.
-const { MARKETS, SEGMENTS } = require('./defaults');
+// Motore di simulazione: funzione pura, nessun accesso al database. Vale per qualsiasi settore.
+// Input: parametri della partita (settore incluso), stato precedente dei gruppi, decisioni, eventi attivi, moduli del round.
+// Output: nuovi KPI per gruppo + punteggio scomposto e classifica.
+const { MARKETS, SOURCING, CREDIT } = require('./defaults');
+const { MARGIN, OBSOLESCENCE } = require('./sectors');
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const round2 = (v) => Math.round(v * 100) / 100;
 
 // Combina gli effetti di tutti gli eventi attivi nel round
-function aggregateEvents(events) {
+function aggregateEvents(events, segmentKeys) {
   const agg = {
     demandByMarket: Object.fromEntries(MARKETS.map((m) => [m, 1])),
-    demandBySegment: Object.fromEntries(SEGMENTS.map((s) => [s, 1])),
+    demandBySegment: Object.fromEntries(segmentKeys.map((s) => [s, 1])),
     costMultiplier: 1,
     tariffByMarket: Object.fromEntries(MARKETS.map((m) => [m, 0])),
     lowSustainabilityBrandShock: 0,
@@ -22,7 +23,7 @@ function aggregateEvents(events) {
       if (e.demandByMarket && Number.isFinite(e.demandByMarket[m])) agg.demandByMarket[m] *= e.demandByMarket[m];
       if (e.tariffByMarket && Number.isFinite(e.tariffByMarket[m])) agg.tariffByMarket[m] += e.tariffByMarket[m];
     }
-    for (const s of SEGMENTS) {
+    for (const s of segmentKeys) {
       if (e.demandBySegment && Number.isFinite(e.demandBySegment[s])) agg.demandBySegment[s] *= e.demandBySegment[s];
     }
     if (Number.isFinite(e.costMultiplier)) agg.costMultiplier *= e.costMultiplier;
@@ -38,43 +39,56 @@ function grow(level, spend, decay, scale = 20000, power = 12) {
   return clamp(level + gain * (1 - level / 100) - decay * level, 0, 100);
 }
 
+// Un segmento "di prestigio" (clienti poco sensibili al prezzo) penalizza i prezzi troppo bassi
+const isPrestige = (seg) => seg.elasticity < 0.8;
+
 /**
- * @param {object} params   parametri partita (vedi DEFAULT_PARAMS)
- * @param {Array}  players  [{ groupId, startup:{segment,market}, prev:{cash,brand,quality,sustainability,inventory,cumProfit}, decision }]
+ * @param {object} params   parametri partita (vedi paramsForSector)
+ * @param {Array}  players  [{ groupId, startup:{segment,market,category}, prev:{cash,brand,quality,sustainability,inventory,cumProfit}, decision }]
  * @param {Array}  events   [{ title, effects }]
+ * @param {object} modules  moduli attivi in questo round: { sourcing, credit, ... }
  */
-function simulateRound(params, players, events) {
-  const ev = aggregateEvents(events);
+function simulateRound(params, players, events, modules = {}) {
+  const segKeys = Object.keys(params.segments);
+  const ev = aggregateEvents(events, segKeys);
   const susPref = (params.sustainabilityPreference || 0) + ev.sustainabilityPreferenceDelta;
+  const wBrand = (params.weights && params.weights.brand) ?? 0.9;
+  const wQuality = (params.weights && params.weights.quality) ?? 0.6;
+  const firstChannel = Object.keys(params.channels)[0];
 
   // 1) aggiorna asset (brand, qualità, sostenibilità) e calcola attrattività
   const rows = players.map((p) => {
     const d = p.decision;
     const seg = params.segments[p.startup.segment];
-    const ch = params.channels[d.channel] || params.channels.ecommerce;
+    const ch = params.channels[d.channel] || params.channels[firstChannel];
+    const cat = (params.categories && params.categories[p.startup.category]) || { margin: 'medio', obsolescence: 'medio' };
+    const src = modules.sourcing ? SOURCING[d.sourcing] || SOURCING.europa : null;
     const shock = p.prev.sustainability < 40 ? ev.lowSustainabilityBrandShock : 0;
 
     const brand = clamp(grow(p.prev.brand, d.marketing, params.decay.brand) - shock, 0, 100);
-    const quality = grow(p.prev.quality, d.design, params.decay.quality);
-    const sustainability = grow(p.prev.sustainability, d.sustainability, params.decay.sustainability);
+    const quality = clamp(grow(p.prev.quality, d.design, params.decay.quality) + (src ? src.quality : 0), 0, 100);
+    const sustainability = clamp(grow(p.prev.sustainability, d.sustainability, params.decay.sustainability) + (src ? src.sustainability : 0), 0, 100);
 
+    // Gli aumenti di costo dovuti agli eventi colpiscono di più le filiere lunghe (produzione lontana)
+    const eventCost = 1 + (ev.costMultiplier - 1) * (src ? src.eventExposure : 1);
     const unitCost = seg.unitCost
+      * (MARGIN[cat.margin] || 1)
+      * (src ? src.cost : 1)
       * (1 + (quality - 50) / 150)
       * (1 + (sustainability - 50) / 300)
-      * ev.costMultiplier
+      * eventCost
       * (1 + ev.tariffByMarket[p.startup.market]);
 
     const priceRatio = d.price / seg.refPrice;
     let priceFactor = Math.pow(priceRatio, -seg.elasticity);
-    // Nel lusso un prezzo troppo basso diluisce il posizionamento
-    if (p.startup.segment === 'luxury' && priceRatio < 0.6) priceFactor *= priceRatio / 0.6;
+    if (isPrestige(seg) && priceRatio < 0.6) priceFactor *= priceRatio / 0.6; // prezzo troppo basso: perde prestigio
     const attractiveness = priceFactor
-      * Math.pow((brand + 5) / 50, 0.9)
-      * Math.pow((quality + 5) / 50, 0.6)
+      * Math.pow((brand + 5) / 50, wBrand)
+      * Math.pow((quality + 5) / 50, wQuality)
       * Math.max(0.2, 1 + susPref * (sustainability - 50) / 100)
       * ((ch.reach && ch.reach[p.startup.segment]) || 1);
 
-    return { p, d, seg, ch, brand, quality, sustainability, unitCost, attractiveness, shock };
+    return { p, d, seg, ch, cat, src, brand, quality, sustainability, unitCost, attractiveness, shock };
   });
 
   // 2) ripartisce la domanda di ogni mercato (segmento x area geografica) tra i concorrenti presenti
@@ -87,24 +101,35 @@ function simulateRound(params, players, events) {
     const [segment, market] = key.split('|');
     const D = params.segments[segment].baseDemand
       * ((params.markets[market] && params.markets[market].demandWeight) || 1)
-      * ev.demandByMarket[market] * ev.demandBySegment[segment];
+      * ev.demandByMarket[market] * (ev.demandBySegment[segment] ?? 1);
     const sumA = list.reduce((s, r) => s + r.attractiveness, 0) + (params.outsideOption || 0);
     for (const r of list) { r.poolDemand = D; r.demand = sumA > 0 ? D * r.attractiveness / sumA : 0; r.competitors = list.length; }
   }
 
   // 3) conto economico
   const results = rows.map((r) => {
-    const { p, d, ch } = r;
+    const { p, d, ch, cat } = r;
     const available = p.prev.inventory + d.production;
     const sold = Math.min(available, r.demand);
     const lost = Math.max(0, r.demand - sold);
-    const inventory = available - sold;
+    const leftover = available - sold;
+    // Deperibilità della categoria: parte dell'invenduto si perde (passa di stagione, scade, diventa obsoleto)
+    const obs = OBSOLESCENCE[cat.obsolescence] ?? 0.25;
+    const spoiled = leftover * obs;
+    const inventory = leftover - spoiled;
     const revenue = sold * d.price * (ch.priceShare ?? 1);
     const productionCost = d.production * r.unitCost;
     const holdingCost = inventory * r.unitCost * (params.holdingCostRate || 0);
     const fixed = params.fixedCostPerRound + (ch.fixedCost || 0);
-    const totalCosts = productionCost + d.marketing + d.design + d.sustainability + fixed + holdingCost;
-    const profit = revenue - totalCosts;
+    let totalCosts = productionCost + d.marketing + d.design + d.sustainability + fixed + holdingCost;
+    let profit = revenue - totalCosts;
+    let cash = p.prev.cash + profit;
+    // Modulo fido bancario: la cassa negativa è un debito che costa interessi
+    let interest = 0;
+    if (modules.credit && cash < 0) {
+      interest = -cash * CREDIT.interestRate;
+      totalCosts += interest; profit -= interest; cash -= interest;
+    }
     return {
       groupId: p.groupId,
       revenue: round2(revenue),
@@ -114,7 +139,7 @@ function simulateRound(params, players, events) {
       total_costs: round2(totalCosts),
       profit: round2(profit),
       cum_profit: round2(p.prev.cumProfit + profit),
-      cash: round2(p.prev.cash + profit),
+      cash: round2(cash),
       brand: round2(r.brand),
       quality: round2(r.quality),
       sustainability: round2(r.sustainability),
@@ -126,9 +151,12 @@ function simulateRound(params, players, events) {
         poolDemand: Math.round(r.poolDemand),
         competitorsInMarket: r.competitors,
         brandShockFromEvents: r.shock,
+        spoiled: Math.round(spoiled),
+        interest: round2(interest),
+        sourcing: r.src ? d.sourcing : null,
         costs: {
           production: round2(productionCost), marketing: d.marketing, design: d.design,
-          sustainability: d.sustainability, fixed: round2(fixed), holding: round2(holdingCost),
+          sustainability: d.sustainability, fixed: round2(fixed), holding: round2(holdingCost), interest: round2(interest),
         },
       },
     };
@@ -160,4 +188,4 @@ function simulateRound(params, players, events) {
   return { results, aggregatedEvents: ev };
 }
 
-module.exports = { simulateRound, aggregateEvents };
+module.exports = { simulateRound, aggregateEvents, grow, isPrestige };

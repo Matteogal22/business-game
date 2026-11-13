@@ -201,6 +201,16 @@ CREATE TABLE IF NOT EXISTS evaluations (
   updated_at    INTEGER NOT NULL
 );
 
+-- 13. SETTORI PERSONALIZZATI DELLA DOCENTE ------------------------------------
+CREATE TABLE IF NOT EXISTS sectors (
+  id         INTEGER PRIMARY KEY,
+  owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  data_json  TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Registro attività (utile al docente per ricostruire cosa è successo)
 CREATE TABLE IF NOT EXISTS audit_log (
   id      INTEGER PRIMARY KEY,
@@ -210,6 +220,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
   at      INTEGER NOT NULL
 );
 `);
+
+// Migrazioni leggere: aggiunge le colonne nuove ai database creati con versioni precedenti
+function addColumn(table, column, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+}
+addColumn('rounds', 'duration_ms', 'INTEGER');          // durata del round (timer), null = senza limite
+addColumn('rounds', 'open_offset_ms', 'INTEGER');       // tempo della lezione all'apertura del round
+addColumn('rounds', 'modules_json', "TEXT NOT NULL DEFAULT '{}'"); // moduli attivi nel round
 
 function log(gameId, actor, action) {
   db.prepare('INSERT INTO audit_log (game_id, actor, action, at) VALUES (?,?,?,?)').run(gameId, actor, action, Date.now());

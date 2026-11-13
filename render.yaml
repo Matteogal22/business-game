@@ -17,6 +17,8 @@ services:
         value: "22"
       - key: TRUST_PROXY
         value: "1"
+      - key: TEACHER_PATH        # indirizzo dell'area docente, es. gestione-bg-7k2q (senza: /docente)
+        sync: false
       - key: DEMO_MODE
         value: "1"
       - key: TEACHER_NAME
